@@ -51,6 +51,7 @@ jobs:
           cache: npm
 
       - name: Set up git
+        id: setup
         run: |
           git config user.name "Readr update"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -67,7 +68,9 @@ jobs:
         id: deps
         run: node scripts/readr-dependabot.mjs
 
-      - run: npm ci
+      - name: Install dependencies
+        id: install
+        run: npm ci
 
       - name: Audit the dependencies that ship in the app
         id: audit
@@ -75,15 +78,19 @@ jobs:
         run: node scripts/readr-audit.mjs
 
       - name: Unit tests
+        id: unit
         run: npm run test:chat-math
 
       - name: Type check and build
+        id: build
         run: npm run build
 
       - name: Ask AI provider tests
+        id: providers
         run: node scripts/test-ai-providers.cjs
 
       - name: Smoke test
+        id: smoke
         run: |
           # Ubuntu 24.04 restricts the user namespaces Chromium's sandbox needs; installed Readr packages ship an
           # AppArmor profile for this, but the development Electron binary doesn't.
@@ -91,6 +98,7 @@ jobs:
           xvfb-run -a npm run smoke
 
       - name: Push main
+        id: push
         run: |
           if [ "$(git rev-parse HEAD)" = "$START" ]; then echo "Nothing new to push."; exit 0; fi
           if ! git push origin HEAD:main 2>push.log; then
@@ -108,10 +116,12 @@ jobs:
         run: node scripts/readr-version.mjs ${{ inputs.release && '--force' || '' }}
 
       - name: Build the Linux installers
+        id: installers
         if: steps.plan.outputs.release == 'true'
         run: npx electron-builder --linux AppImage deb --publish never -c.extraMetadata.version=${{ steps.plan.outputs.version }}
 
       - name: Check the package
+        id: package
         if: steps.plan.outputs.release == 'true'
         env:
           VERSION: ${{ steps.plan.outputs.version }}
@@ -125,6 +135,7 @@ jobs:
           fi
 
       - name: Publish the release
+        id: publish
         if: steps.plan.outputs.release == 'true'
         env:
           VERSION: ${{ steps.plan.outputs.version }}
@@ -152,6 +163,20 @@ jobs:
       - name: Close the merge issue
         if: success() && steps.sync.outputs.merged != 'conflict'
         run: node scripts/readr-issue.mjs close "Folio update needs a hand merge"
+
+      - name: Name the failed step
+        if: failure()
+        env:
+          OUTCOMES: >-
+            setup=${{ steps.setup.outcome }} sync=${{ steps.sync.outcome }} deps=${{ steps.deps.outcome }}
+            install=${{ steps.install.outcome }} unit=${{ steps.unit.outcome }} build=${{ steps.build.outcome }}
+            providers=${{ steps.providers.outcome }} smoke=${{ steps.smoke.outcome }} push=${{ steps.push.outcome }}
+            plan=${{ steps.plan.outcome }} installers=${{ steps.installers.outcome }} package=${{ steps.package.outcome }}
+            publish=${{ steps.publish.outcome }}
+        run: |
+          failed=$(tr ' ' '\n' <<< "$OUTCOMES" | grep '=failure' | cut -d= -f1 | paste -sd, -)
+          echo "::error title=Readr update failed at::${failed:-a reporting step}"
+          printf '%s\n' "### Failed at: ${failed:-a reporting step}" "" >> readr-report.md
 
       - name: Report a failed update
         if: failure()

@@ -1,25 +1,33 @@
 // Merges open Dependabot pull requests whose checks all passed into the local main branch, run by
 // .github/workflows/readr-update.yml before the full test suite. A pull request that conflicts is skipped:
 // Dependabot rebases it once main moves on, and a later run takes it. Once the workflow pushes main, GitHub
-// marks the merged pull requests as merged.
+// marks the merged pull requests as merged. Uses the REST API only.
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
-const gh = (...args) => execFileSync("gh", args, { encoding: "utf8" }).trim();
+const REPO = process.env.GITHUB_REPOSITORY || "mchristo839/readr";
+const api = (path) => JSON.parse(execFileSync("gh", ["api", "-H", "Accept: application/vnd.github+json", path], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }));
 const git = (...args) => spawnSync("git", args, { encoding: "utf8" });
 const output = (key, value) => { if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`); };
 const report = (line) => appendFileSync("readr-report.md", line + "\n");
 
-const OK = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
-const prs = JSON.parse(gh("pr", "list", "--state", "open", "--author", "app/dependabot", "--limit", "20",
-  "--json", "number,title,headRefName,headRefOid"));
+const OK = new Set(["success", "neutral", "skipped"]);
+
+/** True when every check run and commit status on `sha` has finished and passed. */
+function passed(sha) {
+  const runs = api(`repos/${REPO}/commits/${sha}/check-runs?per_page=100`).check_runs ?? [];
+  const statuses = api(`repos/${REPO}/commits/${sha}/status`).statuses ?? [];
+  if (!runs.length && !statuses.length) return false;
+  return runs.every((r) => r.status === "completed" && OK.has(r.conclusion)) && statuses.every((s) => s.state === "success");
+}
+
+const prs = api(`repos/${REPO}/pulls?state=open&per_page=50`).filter((p) => p.user?.login === "dependabot[bot]");
 const merged = [];
 for (const pr of prs) {
-  const { statusCheckRollup: checks = [], headRefOid } = JSON.parse(gh("pr", "view", String(pr.number), "--json", "statusCheckRollup,headRefOid"));
-  const done = checks.length > 0 && checks.every((c) => (c.status ?? "COMPLETED") === "COMPLETED" && OK.has(c.conclusion ?? c.state));
-  if (!done) { console.log(`#${pr.number} skipped: checks haven't all passed yet.`); continue; }
-  if (git("fetch", "-q", "origin", pr.headRefName).status !== 0) { console.log(`#${pr.number} skipped: couldn't fetch its branch.`); continue; }
-  if (git("rev-parse", "FETCH_HEAD").stdout.trim() !== headRefOid) { console.log(`#${pr.number} skipped: its branch changed after the checks ran.`); continue; }
+  const sha = pr.head.sha;
+  if (!passed(sha)) { console.log(`#${pr.number} skipped: its checks haven't all passed yet.`); continue; }
+  if (git("fetch", "-q", "origin", `refs/pull/${pr.number}/head`).status !== 0) { console.log(`#${pr.number} skipped: couldn't fetch it.`); continue; }
+  if (git("rev-parse", "FETCH_HEAD").stdout.trim() !== sha) { console.log(`#${pr.number} skipped: it changed after its checks ran.`); continue; }
   const m = git("merge", "--no-ff", "-q", "-m", `Merge Dependabot: ${pr.title} (#${pr.number})`, "FETCH_HEAD");
   if (m.status !== 0) {
     git("merge", "--abort");
@@ -34,4 +42,5 @@ if (merged.length) {
   for (const pr of merged) report(`- ${pr.title} (#${pr.number})`);
   report("");
 }
+console.log(`Open Dependabot pull requests: ${prs.length}, merged now: ${merged.length}.`);
 output("merged", String(merged.length));
