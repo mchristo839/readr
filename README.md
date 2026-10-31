@@ -29,10 +29,24 @@ npm run dist:win   # or dist:mac, dist:linux, on that platform: installers land 
 
 ## Staying patched
 
-- Dependabot opens a weekly pull request for npm and a monthly one for GitHub Actions.
-- CI runs `npm audit` on runtime dependencies on every push and fails on moderate or higher findings.
-- To take Folio's fixes, add it as a remote and merge: `git remote add upstream https://github.com/Forward-Future/folio`,
-  then `git fetch upstream && git merge upstream/main`. Expect small conflicts in files that mention the app name.
+`.github/workflows/readr-update.yml` runs every day and after every push to `main`:
+
+1. Merges Folio's latest changes. Conflicts caused only by the Readr rename resolve on their own
+   (`scripts/readr-sync.mjs`). A real clash opens a **Folio update needs a hand merge** issue, and dependency fixes
+   keep shipping in the meantime.
+2. Merges Dependabot pull requests whose checks passed (`scripts/readr-dependabot.mjs`).
+3. Audits every dependency that ships in the app, Electron, React and pdf.js included (`scripts/readr-audit.mjs`).
+   Findings open a **Security audit** issue. Folio's own CI audit skips those, since they're listed as devDependencies.
+4. Runs the build, the unit tests, the Ask AI provider tests and the end-to-end smoke test. Nothing ships unless they pass.
+5. Publishes a release with a higher version (`scripts/readr-version.mjs`): Folio 1.10.8 becomes Readr 1.10.800,
+   1.10.801 and so on.
+
+Installed copies check the latest release every four hours, download it, verify its SHA-512, and install it when you
+click **Restart** (a .deb asks for your password). The AppImage replaces itself.
+
+One-time setup on GitHub: enable Actions and Issues on the fork, turn on Dependabot alerts and security updates, and
+add a `READR_BOT_TOKEN` secret (fine-grained token for this repository: Contents, Workflows, Pull requests and Issues
+set to read and write) so merges that touch workflow files can be pushed.
 
 Folio's original documentation is in [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [AGENTS.md](AGENTS.md).
 

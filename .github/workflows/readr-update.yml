@@ -1,0 +1,162 @@
+# Keeps Readr patched. Every day, and after every push to main, it:
+#   1. merges Folio's latest changes (scripts/readr-sync.mjs),
+#   2. takes Dependabot updates whose checks passed (scripts/readr-dependabot.mjs),
+#   3. audits every dependency that ships in the app (scripts/readr-audit.mjs),
+#   4. runs the build, the unit tests, the Ask AI provider tests and the end-to-end smoke test,
+#   5. pushes main and publishes a release that installed copies update to (scripts/readr-version.mjs).
+# Nothing ships unless every test passes. Problems open an issue on this repository instead. When Folio's changes
+# clash with Readr's, the merge waits for a hand (an issue says so) and dependency fixes still ship meanwhile.
+#
+# Pushing merges that include workflow changes (Folio's or Dependabot's) needs the READR_BOT_TOKEN secret: a
+# fine-grained token for this repository with Contents, Workflows, Pull requests and Issues set to read and write.
+name: Readr update
+
+on:
+  schedule:
+    - cron: "41 2 * * *" # 04:41 in Cyprus in winter, 05:41 in summer
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a release even if nothing that ships has changed
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: readr-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'mchristo839/readr'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ secrets.READR_BOT_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.READR_BOT_TOKEN || github.token }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up git
+        run: |
+          git config user.name "Readr update"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/Forward-Future/folio.git
+          git fetch --no-tags upstream main
+          echo "START=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          rm -f readr-report.md readr-audit.md release-notes.md
+
+      - name: Merge Folio's changes
+        id: sync
+        run: node scripts/readr-sync.mjs
+
+      - name: Take Dependabot updates whose checks passed
+        id: deps
+        run: node scripts/readr-dependabot.mjs
+
+      - run: npm ci
+
+      - name: Audit the dependencies that ship in the app
+        id: audit
+        continue-on-error: true
+        run: node scripts/readr-audit.mjs
+
+      - name: Unit tests
+        run: npm run test:chat-math
+
+      - name: Type check and build
+        run: npm run build
+
+      - name: Ask AI provider tests
+        run: node scripts/test-ai-providers.cjs
+
+      - name: Smoke test
+        run: |
+          # Ubuntu 24.04 restricts the user namespaces Chromium's sandbox needs; installed Readr packages ship an
+          # AppArmor profile for this, but the development Electron binary doesn't.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          xvfb-run -a npm run smoke
+
+      - name: Push main
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$START" ]; then echo "Nothing new to push."; exit 0; fi
+          if ! git push origin HEAD:main 2>push.log; then
+            cat push.log
+            if grep -qi "workflow" push.log; then
+              printf '%s\n' "### Push refused" "" \
+                "These changes include workflow files, and GitHub only lets a token with the Workflows permission push those." \
+                "Add a fine-grained token as the \`READR_BOT_TOKEN\` secret (see the top of \`.github/workflows/readr-update.yml\`)." "" >> readr-report.md
+            fi
+            exit 1
+          fi
+
+      - name: Decide on a release
+        id: plan
+        run: node scripts/readr-version.mjs ${{ inputs.release && '--force' || '' }}
+
+      - name: Build the Linux installers
+        if: steps.plan.outputs.release == 'true'
+        run: npx electron-builder --linux AppImage deb --publish never -c.extraMetadata.version=${{ steps.plan.outputs.version }}
+
+      - name: Check the package
+        if: steps.plan.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          test "$(dpkg-deb -f release/Readr-linux-amd64.deb Version)" = "$VERSION"
+          grep -q "^version: $VERSION$" release/latest-linux.yml
+          grep -q "Readr-linux-amd64.deb" release/latest-linux.yml
+          # The package must never add an apt source (Folio's .deb subscribed to Folio's repository).
+          if dpkg-deb --ctrl-tarfile release/Readr-linux-amd64.deb | tar -xO ./postinst | grep -q "sources.list"; then
+            echo "The .deb adds an apt source." && exit 1
+          fi
+
+      - name: Publish the release
+        if: steps.plan.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          cd release
+          sha256sum Readr-linux-amd64.deb Readr-linux-x86_64.AppImage > SHA256SUMS
+          gh release create "v$VERSION" --target "$(git rev-parse HEAD)" --title "Readr $VERSION" --latest \
+            --notes-file ../release-notes.md \
+            Readr-linux-amd64.deb Readr-linux-x86_64.AppImage latest-linux.yml SHA256SUMS
+
+      - name: Report audit findings
+        if: always() && steps.audit.outcome == 'failure'
+        run: |
+          node scripts/readr-issue.mjs open "Security audit: vulnerable dependencies in Readr" readr-audit.md
+
+      - name: Close the audit issue
+        if: steps.audit.outcome == 'success'
+        run: |
+          node scripts/readr-issue.mjs close "Security audit: vulnerable dependencies in Readr"
+
+      - name: Report a Folio merge that needs a hand
+        if: always() && steps.sync.outputs.merged == 'conflict'
+        run: node scripts/readr-issue.mjs open "Folio update needs a hand merge" readr-report.md
+
+      - name: Close the merge issue
+        if: success() && steps.sync.outputs.merged != 'conflict'
+        run: node scripts/readr-issue.mjs close "Folio update needs a hand merge"
+
+      - name: Report a failed update
+        if: failure()
+        run: node scripts/readr-issue.mjs open "Readr update failed" readr-report.md
+
+      - name: Close the failure issue
+        if: success()
+        run: node scripts/readr-issue.mjs close "Readr update failed"

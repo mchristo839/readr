@@ -5,3 +5,6 @@ release
 release-test
 release-*/
 dev-app-update.yml
+readr-report.md
+readr-audit.md
+release-notes.md

@@ -138,6 +138,7 @@ let updateStatus = { state: "idle" };
 let updatesEnabled = false;
 let automaticUpdates = true;
 let activeUpdate = null;
+let autoInstallOnQuit = true;
 const UPDATE_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 function loadUpdatePreference() {
@@ -152,7 +153,7 @@ function saveUpdatePreference(enabled) {
   fs.writeFileSync(filename + ".tmp", JSON.stringify({ enabled }));
   fs.renameSync(filename + ".tmp", filename);
   automaticUpdates = enabled;
-  autoUpdater.autoInstallOnAppQuit = enabled;
+  autoUpdater.autoInstallOnAppQuit = enabled && autoInstallOnQuit;
   if (!enabled && activeUpdate && !activeUpdate.manual) activeUpdate.token?.cancel();
   if (enabled) void checkForUpdates();
   return enabled;
@@ -214,14 +215,21 @@ function installLocation() {
 const MAC_SIGNED = !!require("../package.json").folioMacSigned;
 const NOTIFY_ONLY = IS_MAC && !MAC_SIGNED;
 
+/** "deb" when this copy was installed from Readr's .deb (electron-builder writes resources/package-type). */
+function packageType() {
+  try { return fs.readFileSync(path.join(process.resourcesPath, "package-type"), "utf8").trim(); } catch { return ""; }
+}
+
 function setupAutoUpdate() {
   loadUpdatePreference();
-  // Installed Windows builds, Linux AppImages, and Macs check for updates. Dev runs and the portable Windows exe
-  // don't; Linux packages (.deb) are updated by apt along with the rest of the system.
+  // Installed Windows builds, Linux AppImages and .debs, and Macs check for updates. Dev runs and the portable
+  // Windows exe don't. Readr has no apt repository, so a .deb downloads its update from GitHub Releases (checked
+  // against the SHA-512 in latest-linux.yml) and installs it with dpkg through a password prompt.
   // FOLIO_UPDATE_TEST lets the unpacked build be tested.
   const kind = installKind();
-  if (kind === "package") {
-    updateStatus = { state: "unsupported", message: "system" };
+  const deb = kind === "package" ? packageType() === "deb" : process.env.FOLIO_UPDATE_TEST === "deb";
+  if (kind === "package" && !deb) {
+    updateStatus = { state: "unsupported" };
     return;
   }
   if ((kind === "development" && !process.env.FOLIO_UPDATE_TEST) || kind === "portable") {
@@ -231,7 +239,9 @@ function setupAutoUpdate() {
   updatesEnabled = true;
   if (!app.isPackaged) autoUpdater.forceDevUpdateConfig = true; // reads dev-app-update.yml
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = automaticUpdates;
+  // Installing a .deb asks for a password, so it only happens when the user clicks Restart, never on quit.
+  autoInstallOnQuit = !deb;
+  autoUpdater.autoInstallOnAppQuit = automaticUpdates && autoInstallOnQuit;
   autoUpdater.logger = { info: logUpdate, warn: logUpdate, error: logUpdate, debug() {} };
   autoUpdater.on("checking-for-update", () => setUpdateStatus({ state: "checking" }));
   autoUpdater.on("update-not-available", () => setUpdateStatus({ state: "latest", checkedAt: Date.now() }));
