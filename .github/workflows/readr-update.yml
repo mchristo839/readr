@@ -142,7 +142,8 @@ jobs:
         run: |
           cd release
           sha256sum Readr-linux-amd64.deb Readr-linux-x86_64.AppImage > SHA256SUMS
-          gh release create "v$VERSION" --target "$(git rev-parse HEAD)" --title "Readr $VERSION" --latest \
+          # --repo is needed: with Folio added as a second remote, gh won't guess which repository to publish to.
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$(git rev-parse HEAD)" --title "Readr $VERSION" --latest \
             --notes-file ../release-notes.md \
             Readr-linux-amd64.deb Readr-linux-x86_64.AppImage latest-linux.yml SHA256SUMS
 
