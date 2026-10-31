@@ -15,7 +15,8 @@ interface ReadrDesktop {
   /** Converts a Word document (.doc, .docx) to PDF; the result arrives through onOpenFile. */
   openDocument(file: File): Promise<void>;
   ready(): Promise<boolean>;
-  fetchPdf(url: string): Promise<{ name: string; data: Uint8Array }>;
+  /** Null when the user declines to open an address on their computer or local network. */
+  fetchPdf(url: string): Promise<{ name: string; data: Uint8Array } | null>;
   getAppInfo(): Promise<{ version: string; mode: "development" | "portable" | "installed" | "appimage" | "package"; location: string; platform: string;
     /** True when updates are announced with a download link instead of installed (unsigned macOS builds). */
     notifyOnly: boolean }>;

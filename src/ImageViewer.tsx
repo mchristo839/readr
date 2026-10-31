@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
+import { copyImage } from "./clipboard";
 import type { PDFDocumentProxy } from "./pdf";
 import type { ImageRegion } from "./nightImages";
 
@@ -75,7 +76,7 @@ export function ImageViewer({ pdf, target, onClose }: { pdf: PDFDocumentProxy; t
   const [image, setImage] = useState<HTMLCanvasElement | null>(null);
   const [failed, setFailed] = useState(false);
   const [actual, setActual] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copy, setCopy] = useState<"idle" | "done" | "failed">("idle");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -102,13 +103,16 @@ export function ImageViewer({ pdf, target, onClose }: { pdf: PDFDocumentProxy; t
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose]);
 
-  const copy = () => {
-    image?.toBlob((blob) => {
-      if (!blob) return;
-      navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }, () => {});
+  const copyImageToClipboard = () => {
+    image?.toBlob(async (blob) => {
+      if (!blob) {
+        setCopy("failed");
+        setTimeout(() => setCopy("idle"), 2500);
+        return;
+      }
+      const ok = await copyImage(blob);
+      setCopy(ok ? "done" : "failed");
+      setTimeout(() => setCopy("idle"), ok ? 1500 : 2500);
     }, "image/png");
   };
 
@@ -119,8 +123,9 @@ export function ImageViewer({ pdf, target, onClose }: { pdf: PDFDocumentProxy; t
         <button className="pop-btn" onClick={() => setActual(!actual)} disabled={!image}>
           <Icon name={actual ? "fitPage" : "plus"} size={15} /> {actual ? "Fit to window" : "Actual size"}
         </button>
-        <button className="pop-btn" onClick={copy} disabled={!image}>
-          <Icon name={copied ? "check" : "copy"} size={15} /> {copied ? "Copied" : "Copy image"}
+        <button className="pop-btn" onClick={copyImageToClipboard} disabled={!image}>
+          <Icon name={copy === "done" ? "check" : copy === "failed" ? "close" : "copy"} size={15} />{" "}
+          {copy === "done" ? "Copied" : copy === "failed" ? "Copy failed" : "Copy image"}
         </button>
         {target.href && (
           <a className="pop-btn" href={target.href} target="_blank" rel="noreferrer" title={target.href}>

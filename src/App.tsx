@@ -140,6 +140,9 @@ export default function App() {
   const [focus, setFocus] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [dialog, setDialog] = useState<"info" | "shortcuts" | "about" | "url" | "settings" | "changelog" | null>(null);
+  // A pasted or dropped link waits in Open from URL, so the user sees where it goes before Readr contacts it.
+  const [linkDraft, setLinkDraft] = useState("");
+  const openUrlDialog = (link = "") => { setLinkDraft(link); setDialog("url"); };
   const [pending, setPending] = useState<Pending | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -399,7 +402,7 @@ export default function App() {
       setError(null);
       setToast(`Opening ${host}…`);
       try {
-        let file: { name: string; data: Uint8Array };
+        let file: { name: string; data: Uint8Array } | null;
         if (window.folioDesktop) {
           file = await window.folioDesktop.fetchPdf(url);
         } else {
@@ -416,6 +419,7 @@ export default function App() {
         }
         if (generation !== openGeneration.current) return;
         setToast(null);
+        if (!file) return setLoading(false);
         await openBytes(file.name, file.data);
       } catch (e: any) {
         if (generation !== openGeneration.current) return;
@@ -841,7 +845,7 @@ export default function App() {
       }
       if (mod && e.key.toLowerCase() === "o") {
         e.preventDefault();
-        if (e.shiftKey) setDialog("url");
+        if (e.shiftKey) openUrlDialog();
         else pickFile();
         return;
       }
@@ -947,17 +951,16 @@ export default function App() {
       const file = e.dataTransfer?.files[0];
       const url = !file && e.dataTransfer ? droppedUrl(e.dataTransfer) : null;
       if (file) void openFile(file);
-      else if (url) void openUrl(url);
+      else if (url) openUrlDialog(url);
       else setError("Drop a PDF file or a link to a PDF.");
     };
-    // Pasting a PDF link (outside text fields) opens it too.
+    // Pasting a link (outside text fields) fills in Open from URL too.
     const paste = (e: ClipboardEvent) => {
       if (signing || (e.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable=true], .freeTextEditor")) return;
       const url = parseWebUrl(e.clipboardData?.getData("text/plain"));
       if (!url) return;
       e.preventDefault();
-      setDialog(null);
-      void openUrl(url);
+      openUrlDialog(url);
     };
     window.addEventListener("dragstart", start);
     window.addEventListener("dragend", end);
@@ -975,7 +978,7 @@ export default function App() {
       window.removeEventListener("dragover", over);
       window.removeEventListener("drop", drop);
     };
-  }, [openFile, openUrl, signing]);
+  }, [openFile, signing]);
 
   const runFind = (query: string, opts: { again?: boolean; previous?: boolean; caseSensitive?: boolean; entireWord?: boolean }) =>
     busRef.current!.dispatch("find", {
@@ -1242,7 +1245,7 @@ export default function App() {
         )}
       </div>
 
-      {!doc && <Welcome onPick={pickFile} onOpenUrl={() => setDialog("url")} onOpenBytes={openBytes} onError={setError} onSample={openSample} loading={loading} />}
+      {!doc && <Welcome onPick={pickFile} onOpenUrl={() => openUrlDialog()} onOpenBytes={openBytes} onError={setError} onSample={openSample} loading={loading} />}
 
       {loading && doc && <div className="loading-bar" />}
 
@@ -1270,7 +1273,7 @@ export default function App() {
       {/* Closing goes back to Settings, where the changelog is opened from. */}
       {dialog === "changelog" && <ChangelogDialog onClose={() => setDialog("settings")} />}
       {doc && imageView && <ImageViewer pdf={doc.pdf} target={imageView} onClose={() => setImageView(null)} />}
-      {dialog === "url" && <OpenUrlDialog onClose={() => setDialog(null)} onSubmit={(url) => { setDialog(null); openUrl(url); }} />}
+      {dialog === "url" && <OpenUrlDialog key={linkDraft} initial={linkDraft} onClose={() => setDialog(null)} onSubmit={(url) => { setDialog(null); openUrl(url); }} />}
       {doc && signing && <SignatureDialog key={doc.id + ":" + page} pdf={doc.pdf} pageNumber={page} targets={signatureTargets}
         onClose={() => setSigning(false)} onApprove={async (signature, rect) => {
           await placeSignature(viewerRef.current!, doc.pdf, page, signature, rect);

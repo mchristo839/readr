@@ -24,9 +24,10 @@ contextBridge.exposeInMainWorld("folioDesktop", {
   ready: () => ipcRenderer.invoke("folio:ready"),
   platform: process.platform,
   openDownload: () => ipcRenderer.invoke("folio:open-download"),
-  /** Downloads a PDF from an http(s) link; resolves to { name, data: Uint8Array }. */
+  /** Downloads a PDF from an http(s) link; resolves to { name, data: Uint8Array }, or null if the user said no. */
   async fetchPdf(url) {
     const file = await ipcRenderer.invoke("folio:fetch-pdf", url);
+    if (file.cancelled) return null;
     if (file.error) throw new Error(file.error);
     return { name: file.name, data: new Uint8Array(file.data) };
   },

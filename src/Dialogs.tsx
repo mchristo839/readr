@@ -173,8 +173,8 @@ export function parseWebUrl(text: string | null | undefined) {
   }
 }
 
-export function OpenUrlDialog({ onSubmit, onClose }: { onSubmit: (url: string) => void; onClose: () => void }) {
-  const [value, setValue] = useState("");
+export function OpenUrlDialog({ initial = "", onSubmit, onClose }: { initial?: string; onSubmit: (url: string) => void; onClose: () => void }) {
+  const [value, setValue] = useState(initial);
   const url = parseWebUrl(value);
   return (
     <Modal title="Open from URL" onClose={onClose}>

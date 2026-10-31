@@ -4,6 +4,7 @@
 // Run `npm run build` first.
 import { _electron as electron } from "playwright-core";
 import { createRequire } from "node:module";
+import http from "node:http";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,8 +20,10 @@ mkdirSync(shots, { recursive: true });
 const env = { ...process.env, FOLIO_TEST_USER_DATA: mkdtempSync(path.join(tmpdir(), "folio-smoke-")),
   FOLIO_TEST_HIDDEN: process.env.FOLIO_SMOKE_SHOW === "1" ? "0" : "1" };
 delete env.ELECTRON_RUN_AS_NODE;
-// Containers often run as root, where Chromium's sandbox can't start.
-const args = [root, ...(process.platform === "linux" && process.getuid?.() === 0 ? ["--no-sandbox"] : [])];
+// Containers often run as root, where Chromium's sandbox can't start. The made-up names stand in for web addresses
+// that lead to this computer (see the local network checks below).
+const args = [root, "--host-resolver-rules=MAP folio-local.test 127.0.0.1, MAP folio-rebind.test 127.0.0.1",
+  ...(process.platform === "linux" && process.getuid?.() === 0 ? ["--no-sandbox"] : [])];
 
 // The smallest .docx Word opens: one paragraph of `text`.
 async function wordDocument(text) {
@@ -136,6 +139,25 @@ try {
     console.log("--  clipboard check skipped: the window isn't focused");
   }
 
+  // A refused clipboard write must be reported, not dressed up as a copy. The write is blocked here so the button's
+  // failure path runs on every machine, not just where the OS happens to refuse it.
+  await page.evaluate(() => {
+    globalThis.__clipboardWriteText = navigator.clipboard.writeText;
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      configurable: true,
+      value: () => Promise.reject(new DOMException("Write permission denied.", "NotAllowedError")),
+    });
+  });
+  await page.locator(".selection-popover").getByRole("button", { name: "Copy" }).click();
+  await page.locator('.selection-popover button[title="Copy failed"]').waitFor({ timeout: 5_000 });
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      configurable: true,
+      value: globalThis.__clipboardWriteText,
+    });
+  });
+  console.log("ok  a refused clipboard write is reported as Copy failed");
+
   await page.getByRole("button", { name: "Highlight yellow" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".highlightEditor").length === 1, null, { timeout: 15_000 });
   console.log("ok  highlight created");
@@ -239,6 +261,72 @@ try {
   await openWordDocument();
   assert.deepEqual(readdirSync(folder).sort(), ["Quarterly report.docx", "Quarterly report.pdf"]);
   console.log("ok  Word document converted to PDF, saved next to it, and reused");
+
+  // A pasted link fills in Open from URL; nothing is contacted until the user presses Open.
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.setData("text/plain", "https://example.com/paper.pdf");
+    document.querySelector(".viewer-container").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true }));
+  });
+  const urlDialog = page.getByRole("dialog", { name: "Open from URL" });
+  assert.equal(await urlDialog.getByLabel("PDF URL").inputValue(), "https://example.com/paper.pdf");
+  await page.keyboard.press("Escape");
+  console.log("ok  a pasted link waits in Open from URL");
+
+  // Questions Folio asks in the main process are answered here, and links are recorded instead of reaching the browser.
+  await app.evaluate(({ dialog, shell }) => {
+    const check = globalThis.folioCheck = { asked: [], opened: [], answer: 1 };
+    dialog.showMessageBox = async (_window, options) => { check.asked.push(options.message); return { response: check.answer }; };
+    shell.openExternal = async (url) => { check.opened.push(url); };
+  });
+  const answer = (response) => app.evaluate((_electron, response) => { globalThis.folioCheck.answer = response; }, response);
+  const settled = async (count) => {
+    for (let i = 0; i < 50 && (await app.evaluate(() => globalThis.folioCheck.asked.length)) < count; i++) await page.waitForTimeout(100);
+    return app.evaluate(() => globalThis.folioCheck);
+  };
+
+  // A link from a document opens in the browser only after the user has seen where it goes; Folio's own links just open.
+  await page.evaluate(() => window.open("https://example.com/invoice", "_blank"));
+  assert.deepEqual(await settled(1), { asked: ["Open example.com in your browser?"], opened: [], answer: 1 });
+  await answer(0);
+  await page.evaluate(() => window.open("https://example.com/invoice", "_blank"));
+  assert.deepEqual((await settled(2)).opened, ["https://example.com/invoice"]);
+  await page.evaluate(() => window.open("https://claude.com/claude-code", "_blank"));
+  await page.waitForTimeout(300);
+  const linkCheck = await settled(2);
+  assert.deepEqual([linkCheck.asked.length, linkCheck.opened.at(-1)], [2, "https://claude.com/claude-code"]);
+  console.log("ok  links from documents ask before opening");
+
+  // Addresses on this computer or the local network are reached only once the user agrees, also when the page asks
+  // directly (as a document that took over the page might) and when a name only resolves there.
+  const served = [];
+  const server = http.createServer((req, res) => { served.push(req.url); res.writeHead(200, { "content-type": "application/pdf" }); res.end(Buffer.from(sample)); });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const fetchPdf = (url) => page.evaluate((url) => window.folioDesktop.fetchPdf(url).then((file) => file?.name ?? null, (error) => error.message), url);
+  try {
+    await answer(1);
+    assert.equal(await fetchPdf(`http://127.0.0.1:${port}/local.pdf`), null);
+    assert.equal(await fetchPdf(`http://folio-local.test:${port}/named.pdf`), null);
+    assert.deepEqual(served, []);
+    assert.deepEqual((await settled(4)).asked.slice(2), [`Open 127.0.0.1:${port}?`, `Open folio-local.test:${port}?`]);
+    await answer(0);
+    assert.equal(await fetchPdf(`http://folio-local.test:${port}/named.pdf`), "named.pdf");
+    assert.deepEqual(served, ["/named.pdf"]);
+    // A name that looks public when Folio checks it but leads here when Chromium connects (DNS rebinding) is refused.
+    await app.evaluate(({ session }) => {
+      const sessions = Object.getPrototypeOf(session.defaultSession);
+      const resolveHost = sessions.resolveHost;
+      sessions.resolveHost = function (host, options) {
+        return host === "folio-rebind.test" ? Promise.resolve({ endpoints: [{ address: "93.184.215.14", family: "ipv4" }] }) : resolveHost.call(this, host, options);
+      };
+    });
+    assert.match(await fetchPdf(`http://folio-rebind.test:${port}/rebound.pdf`), /local network address/);
+    assert.equal((await settled(5)).asked.length, 5);
+  } finally {
+    server.close();
+  }
+  console.log("ok  local network addresses need the user's OK");
 
   assert.deepEqual(failures, []);
   console.log(`PASS (${process.platform})`);

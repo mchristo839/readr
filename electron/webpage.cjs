@@ -4,6 +4,7 @@
 const { BrowserWindow, session } = require("electron");
 const crypto = require("node:crypto");
 const { safePdfName } = require("./filenames.cjs");
+const { guardSession } = require("./network.cjs");
 
 const TOTAL_TIMEOUT_MS = 60_000;
 // Pages are laid out like a desktop browser window: 1280 CSS px wide, no margins.
@@ -71,25 +72,17 @@ const PREPARE_PAGE = `(async () => {
 })()`;
 
 /**
- * Loads `rawUrl` and prints it to PDF. `isLocalHost(hostname)` identifies loopback/private hosts:
- * a public page may not make requests into the local network.
+ * Loads `rawUrl` and prints it to PDF. Unless `allowLocal` (a local page the user chose to open), the page can't
+ * make requests into this computer or the local network.
  * Resolves to { name, data } or { error }.
  */
-async function captureWebpage(rawUrl, isLocalHost) {
+async function captureWebpage(rawUrl, allowLocal) {
   const url = new URL(rawUrl);
   const ses = session.fromPartition(`folio-webpage-${crypto.randomUUID()}`); // in-memory only
   ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   ses.setPermissionCheckHandler(() => false);
   ses.on("will-download", (event) => event.preventDefault());
-  const publicPage = !isLocalHost(url.hostname);
-  ses.webRequest.onBeforeRequest((details, callback) => {
-    let target;
-    try { target = new URL(details.url); } catch { return callback({ cancel: true }); }
-    const web = target.protocol === "http:" || target.protocol === "https:";
-    if (!web && target.protocol !== "data:" && target.protocol !== "blob:") return callback({ cancel: true });
-    if (web && publicPage && isLocalHost(target.hostname)) return callback({ cancel: true });
-    callback({});
-  });
+  guardSession(ses, allowLocal);
 
   const win = new BrowserWindow({
     show: false,

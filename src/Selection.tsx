@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
 import { keys } from "./platform";
+import { copyText } from "./clipboard";
 
 export interface SelectionInfo {
   text: string;
@@ -89,7 +90,7 @@ interface PopoverProps {
 
 /** Shown as soon as text is selected: one-click colors, plus a note field that's ready to type in. */
 export function SelectionPopover({ info, stageWidth, colors, current, onHighlight, onAsk, onPin, onDismiss }: PopoverProps) {
-  const [copied, setCopied] = useState(false);
+  const [copy, setCopy] = useState<"idle" | "done" | "failed">("idle");
   const [note, setNote] = useState("");
   const width = 30 * colors.length + 210;
   return (
@@ -118,16 +119,15 @@ export function SelectionPopover({ info, stageWidth, colors, current, onHighligh
         </button>
         <button
           className="pop-btn icon-only"
-          title={copied ? "Copied" : "Copy"}
+          title={copy === "done" ? "Copied" : copy === "failed" ? "Copy failed" : "Copy"}
           aria-label="Copy"
-          onClick={() => {
-            navigator.clipboard.writeText(info.text).then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1200);
-            }, () => {});
+          onClick={async () => {
+            const ok = await copyText(info.text);
+            setCopy(ok ? "done" : "failed");
+            setTimeout(() => setCopy("idle"), ok ? 1200 : 2500);
           }}
         >
-          <Icon name={copied ? "check" : "copy"} size={15} />
+          <Icon name={copy === "done" ? "check" : copy === "failed" ? "close" : "copy"} size={15} />
         </button>
       </div>
       <input

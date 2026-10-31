@@ -1,13 +1,14 @@
 // Readr desktop shell: one window, PDFs (and Word documents, converted) opened from Explorer / "Open with",
 // files served over app://.
-const { app, BrowserWindow, protocol, net, ipcMain, dialog, shell, screen } = require("electron");
+const { app, BrowserWindow, protocol, net, ipcMain, dialog, shell, screen, session } = require("electron");
+const crypto = require("node:crypto");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
-const { isIP } = require("node:net");
 const { autoUpdater } = require("electron-updater");
 const ai = require("./ai.cjs");
 const { captureWebpage } = require("./webpage.cjs");
+const { guardSession, isLocalHost } = require("./network.cjs");
 const { safePdfName } = require("./filenames.cjs");
 const { csp } = require("./csp.cjs");
 const { WORD_FILE, convertToPdf, pdfPathFor } = require("./convert.cjs");
@@ -330,9 +331,9 @@ function createWindow() {
   win.on("close", saveWindow);
   win.loadURL(DEV_URL ? DEV_URL + "/" : "app://folio/index.html");
 
-  // Links inside PDFs open in the default browser, never in-app.
+  // Links inside PDFs open in the default browser, never in-app (see openLink).
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:|^mailto:/.test(url)) shell.openExternal(url);
+    void openLink(url);
     return { action: "deny" };
   });
   // Subframes (the print frame) may only show Readr pages, local blob: PDFs, and Chromium's built-in PDF viewer.
@@ -344,7 +345,7 @@ function createWindow() {
   win.webContents.on("will-navigate", (e, url) => {
     if (!isAppUrl(url)) {
       e.preventDefault();
-      if (/^https?:/.test(url)) shell.openExternal(url);
+      if (/^https?:/.test(url)) void openLink(url);
     }
   });
 
@@ -367,21 +368,51 @@ function createWindow() {
 
 const MAX_URL_PDF_BYTES = 300 * 1024 * 1024;
 
-// Literal loopback/private/link-local hosts. A public link isn't allowed to redirect into the local network.
-function isLocalHost(hostname) {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
-  const version = isIP(host);
-  if (version === 4) {
-    const [a, b] = host.split(".").map(Number);
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+// Shown in dialogs: long enough to see where a link goes, short enough that the dialog stays readable.
+const shortUrl = (url) => (url.href.length > 300 ? url.href.slice(0, 300) + "…" : url.href);
+
+// Readr's own links (src/ai.ts) open without asking.
+const FOLIO_LINKS = new Set(["https://chatgpt.com/settings/usage", "https://claude.com/claude-code",
+  "https://openrouter.ai/settings/keys", "https://openrouter.ai/activity"]);
+let askingAboutLink = false;
+
+// Links open in the browser (mailto: in the mail app), never in Readr, and only once the user has seen where they go:
+// a PDF decides both a link's address and its clickable area, which can be invisible and cover the whole page.
+async function openLink(rawUrl) {
+  let url;
+  try { url = new URL(rawUrl); } catch { return; }
+  if (url.protocol !== "http:" && url.protocol !== "https:" && url.protocol !== "mailto:") return;
+  if (!FOLIO_LINKS.has(url.href)) {
+    if (askingAboutLink || !win) return; // one question at a time
+    askingAboutLink = true;
+    const mail = url.protocol === "mailto:";
+    const { response } = await dialog.showMessageBox(win, {
+      type: "question",
+      title: "Open link?",
+      message: mail ? "Open this email link in your mail app?" : `Open ${url.host} in your browser?`,
+      detail: shortUrl(url),
+      buttons: [mail ? "Open mail app" : "Open link", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+    }).finally(() => { askingAboutLink = false; });
+    if (response !== 0) return;
   }
-  if (version === 6) {
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(host);
-    if (mapped) return isLocalHost(mapped[1]);
-    return host === "::" || host === "::1" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith("::ffff:");
-  }
-  return false;
+  await shell.openExternal(url.href);
+}
+
+// Asked before Readr opens an address on this computer or the local network, here rather than in the page: a document
+// that managed to run code in the page could otherwise use Readr to reach them.
+async function confirmLocalAddress(url) {
+  const { response } = await dialog.showMessageBox(win, {
+    type: "warning",
+    title: "Open a local address?",
+    message: `Open ${url.host}?`,
+    detail: `This address is on your computer or local network.\n\n${shortUrl(url)}`,
+    buttons: ["Open", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+  });
+  return response === 0;
 }
 
 // The name a download gets: from Content-Disposition when the server sends one, else the URL's last segment.
@@ -392,16 +423,15 @@ function pdfNameFromResponse(url, disposition) {
   return safePdfName(name, url.hostname);
 }
 
-// Downloads a PDF link in the main process, so cross-origin URLs work without CORS.
+// Downloads a PDF link in the main process, so cross-origin URLs work without CORS. Unless `allowLocal`, neither the
+// link nor a redirect may lead into this computer or the local network.
 // Resolves to { name, data } or { error } (error text is shown to the user as-is).
-function downloadPdf(rawUrl) {
-  let url;
-  if (typeof rawUrl !== "string" || rawUrl.length > 8192) return Promise.resolve({ error: "That isn't a valid web address." });
-  try { url = new URL(rawUrl.trim()); } catch { return Promise.resolve({ error: "That isn't a valid web address." }); }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return Promise.resolve({ error: "Only http:// and https:// links can be opened." });
+function downloadPdf(url, allowLocal) {
+  const ses = session.fromPartition(`folio-download-${crypto.randomUUID()}`); // in-memory only
+  const refusedLocal = guardSession(ses, allowLocal);
   return new Promise((resolve) => {
     let done = false;
-    const request = net.request({ url: url.toString(), redirect: "manual" });
+    const request = net.request({ url: url.toString(), redirect: "manual", session: ses, cache: "no-store" });
     const finish = (result) => {
       if (done) return;
       done = true;
@@ -417,11 +447,11 @@ function downloadPdf(rawUrl) {
       const next = new URL(redirectUrl, url);
       if (++hops > 10) return finish({ error: "That link redirects too many times." });
       if (next.protocol !== "http:" && next.protocol !== "https:") return finish({ error: "That link redirects somewhere Readr can't open." });
-      if (isLocalHost(next.hostname) && !isLocalHost(url.hostname)) return finish({ error: "That link redirects to a local network address, so Readr didn't follow it." });
       url = next;
       request.followRedirect();
     });
-    request.on("error", () => finish({ error: `Couldn't reach ${url.hostname}.` }));
+    request.on("error", () => finish({ error: refusedLocal()
+      ? "That link leads to a local network address, so Readr didn't follow it." : `Couldn't reach ${url.hostname}.` }));
     request.on("response", (response) => {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return finish({ error: `The server responded with ${response.statusCode}${response.statusMessage ? " " + response.statusMessage : ""}.` });
@@ -502,10 +532,19 @@ if (!app.requestSingleInstanceLock()) {
       if (typeof file !== "string" || !WORD_FILE.test(file) || !path.isAbsolute(file)) throw new Error("Not a Word document");
       void sendFile(file);
     });
-    // PDF links open directly; webpages are converted to a PDF first.
-    handle("folio:fetch-pdf", async (_event, url) => {
-      const result = await downloadPdf(url);
-      return result.webpage ? captureWebpage(result.webpage, isLocalHost) : result;
+    // PDF links open directly; webpages are converted to a PDF first. An address on this computer or the local
+    // network opens only once the user agrees (cancelling resolves to { cancelled: true }).
+    handle("folio:fetch-pdf", async (_event, rawUrl) => {
+      let url;
+      try { url = new URL(typeof rawUrl === "string" && rawUrl.length <= 8192 ? rawUrl.trim() : ""); }
+      catch { return { error: "That isn't a valid web address." }; }
+      if (url.protocol !== "http:" && url.protocol !== "https:") return { error: "Only http:// and https:// links can be opened." };
+      const local = await isLocalHost(url.hostname, session.defaultSession);
+      if (local && !(await confirmLocalAddress(url))) return { cancelled: true };
+      const result = await downloadPdf(url, local);
+      if (!result.webpage) return result;
+      // A local page that redirected to the web is held to the same rules as any other webpage.
+      return captureWebpage(result.webpage, local && await isLocalHost(new URL(result.webpage).hostname, session.defaultSession));
     });
     handle("folio:app-info", () => ({ version: app.getVersion(), mode: installKind(), location: installLocation(), platform: process.platform,
       notifyOnly: NOTIFY_ONLY }));

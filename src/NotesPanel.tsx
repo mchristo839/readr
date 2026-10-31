@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "./icons";
 import { keys } from "./platform";
+import { copyText } from "./clipboard";
 import type { Mark, MarkupState } from "./markup";
 
 interface Props {
@@ -69,7 +70,7 @@ function toMarkdown(docName: string, state: MarkupState) {
 
 export function NotesPanel({ state, docName, persisted, onReveal, onNote, onRemove, onDocNote, onAsk }: Props) {
   const docNote = useDebouncedField(state.note, onDocNote);
-  const [copied, setCopied] = useState(false);
+  const [copy, setCopy] = useState<"idle" | "done" | "failed">("idle");
   const highlights = state.marks.filter((m) => m.type === "highlight" || (m.type === "freetext" && m.text));
   const other = state.marks.length - highlights.length;
 
@@ -80,16 +81,17 @@ export function NotesPanel({ state, docName, persisted, onReveal, onNote, onRemo
         <button
           className="link small"
           disabled={!highlights.length && !state.note.trim()}
-          onClick={() => {
-            // Only confirm once the text has really reached the clipboard.
-            navigator.clipboard.writeText(toMarkdown(docName, state)).then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }, () => {});
+          onClick={async () => {
+            // Only confirm once the text has really reached the clipboard, and say so
+            // when it didn't instead of reporting a copy that never happened.
+            const ok = await copyText(toMarkdown(docName, state));
+            setCopy(ok ? "done" : "failed");
+            setTimeout(() => setCopy("idle"), ok ? 1500 : 2500);
           }}
           title="Copy all notes and highlights as Markdown"
         >
-          <Icon name={copied ? "check" : "copy"} size={13} /> {copied ? "Copied" : "Copy all"}
+          <Icon name={copy === "done" ? "check" : copy === "failed" ? "close" : "copy"} size={13} />{" "}
+          {copy === "done" ? "Copied" : copy === "failed" ? "Copy failed" : "Copy all"}
         </button>
       </div>
 

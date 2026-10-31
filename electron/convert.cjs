@@ -1,7 +1,7 @@
 // Word documents (.doc, .docx) are converted to PDF before Readr opens them. The best converter on the computer
 // wins: Microsoft Word (Windows), then LibreOffice (any platform), then Readr's own, which lays the text, tables,
 // and images out in a hidden window and prints them (.docx everywhere; .doc on macOS, through textutil).
-const { app, BrowserWindow, session } = require("electron");
+const { app, BrowserWindow, session, utilityProcess } = require("electron");
 const { execFile } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -58,27 +58,49 @@ function libreOffice() {
   return candidates.find((file) => fs.existsSync(file));
 }
 
+// Settings for that profile: no macros, and no linked content fetched while converting (a document can link an image
+// on the sender's server, which would then learn when and where it was opened).
+const LIBREOFFICE_SETTINGS = `<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop></item>
+</oor:items>
+`;
+
 async function withLibreOffice(soffice, source, dir) {
   // A profile of its own lets the conversion run while LibreOffice is open (which would otherwise take the job and
   // return straight away) and keeps the user's settings out of it.
-  const profile = pathToFileURL(path.join(dir, "libreoffice-profile")).href;
-  await run(soffice, ["--headless", "--norestore", "--nolockcheck", `-env:UserInstallation=${profile}`, "--convert-to", "pdf", "--outdir", dir, source]);
+  const profile = path.join(dir, "libreoffice-profile");
+  fs.mkdirSync(path.join(profile, "user"), { recursive: true });
+  fs.writeFileSync(path.join(profile, "user", "registrymodifications.xcu"), LIBREOFFICE_SETTINGS);
+  await run(soffice, ["--headless", "--norestore", "--nolockcheck", `-env:UserInstallation=${pathToFileURL(profile).href}`, "--convert-to", "pdf", "--outdir", dir, source]);
   return path.join(dir, path.basename(source).replace(/\.[^.]+$/, ".pdf"));
 }
 
-// Readr's own layout for the built-in converter: a printed page with Word's usual defaults.
-const DOCUMENT_CSS = `
-@page { margin: 1in; }
-body { font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; font-size: 11pt; line-height: 1.4; color: #000; margin: 0; overflow-wrap: break-word; }
-h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.2; margin: 1.2em 0 0.4em; break-after: avoid; }
-h1 { font-size: 20pt; } h2 { font-size: 16pt; } h3 { font-size: 13pt; } h4, h5, h6 { font-size: 11pt; }
-p { margin: 0 0 0.6em; }
-img { max-width: 100%; height: auto; }
-table { border-collapse: collapse; margin: 0 0 0.8em; max-width: 100%; }
-td, th { border: 1px solid #999; padding: 3pt 6pt; vertical-align: top; }
-td > p:last-child, th > p:last-child { margin-bottom: 0; }
-tr { break-inside: avoid; }
-`;
+// The built-in converter reads a .docx in a utility process (docx-worker.cjs) and stops it if it takes too long or
+// grows past this: a few hundred kilobytes of .docx can unpack into more than Readr's memory.
+const WORKER_MEMORY_LIMIT = 2 * 1024 ** 3;
+
+function docxToHtml(source, output, title) {
+  return new Promise((resolve, reject) => {
+    const worker = utilityProcess.fork(path.join(__dirname, "docx-worker.cjs"), [], { serviceName: "Readr Word converter" });
+    const stop = (error) => {
+      clearTimeout(timer);
+      clearInterval(watch);
+      worker.kill();
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => stop(new Error("timed out")), CONVERT_TIMEOUT_MS);
+    const watch = setInterval(() => {
+      const memory = app.getAppMetrics().find((metric) => metric.pid === worker.pid)?.memory.workingSetSize ?? 0; // KB
+      if (memory * 1024 > WORKER_MEMORY_LIMIT) stop(Object.assign(new Error("ran out of memory"), { userMessage: "It's too large to convert." }));
+    }, 250);
+    worker.once("message", (result) => stop(result.error ? new Error(result.error) : null));
+    worker.once("exit", (code) => stop(new Error(`stopped (exit code ${code})`)));
+    worker.postMessage({ source, output, title });
+  });
+}
 
 // Most of the Americas print on Letter paper; everyone else on A4.
 const LETTER_COUNTRIES = new Set(["US", "CA", "MX", "CL", "CO", "VE", "PH", "GT", "PR", "CR", "PA", "DO", "SV", "NI", "HN"]);
@@ -121,23 +143,16 @@ async function printHtml(htmlFile) {
   }
 }
 
-const escapeHtml = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-
 async function builtIn(source, dir, title) {
   const htmlFile = path.join(dir, "document.html");
-  let body;
   if (/\.docx$/i.test(source)) {
-    // Images come out as data: URLs, so the page needs nothing else.
-    body = (await require("mammoth").convertToHtml({ path: source })).value;
+    await docxToHtml(source, htmlFile, title);
   } else if (process.platform === "darwin") {
     await run("/usr/bin/textutil", ["-convert", "html", "-output", htmlFile, source]);
-    body = fs.readFileSync(htmlFile, "utf8");
+    fs.writeFileSync(htmlFile, fs.readFileSync(htmlFile, "utf8").replace(/<head[^>]*>/i, (head) => `${head}<style>@page { margin: 1in; }</style>`));
   } else {
     throw Object.assign(new Error("no converter"), { userMessage: "Converting .doc files needs Microsoft Word or LibreOffice. Install either one, or save the document as .docx." });
   }
-  const page = /<html[\s>]/i.test(body) ? body.replace(/<head[^>]*>/i, (head) => `${head}<style>@page { margin: 1in; }</style>`)
-    : `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${DOCUMENT_CSS}</style></head><body>${body}</body></html>`;
-  fs.writeFileSync(htmlFile, page);
   return printHtml(htmlFile);
 }
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.10.8
+
+- Clicking a link in a PDF shows where it goes and asks before opening your browser or mail app. A PDF can make a link
+  invisible and as large as the page, so any click could open a site.
+- A pasted or dropped link fills in **Open from URL** instead of opening straight away, so you can check it first.
+- Links and webpages can't reach your computer or local network (your router, a NAS, a dev server) unless you say so.
+  Before, a web address that only pointed there by name got through.
+- Word documents that Folio converts itself are read in a separate process. A document built to use up memory now
+  fails with a message instead of closing Folio. LibreOffice converts with macros and linked content turned off.
+
 ## 1.10.7
 
 - Highlighting keeps working after your first highlight. Before, it could stop until you reopened the document, and
