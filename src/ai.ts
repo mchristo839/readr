@@ -1,10 +1,13 @@
 // Shared by the Ask AI panel and Settings: the providers' pages, and the ChatGPT sign-in flow.
-export type AiProvider = "chatgpt" | "claude" | "openrouter";
+export type AiProvider = "anthropic" | "openrouter" | "chatgpt" | "claude";
 
 export const USAGE_URL = "https://chatgpt.com/settings/usage";
 export const CLAUDE_CODE_URL = "https://claude.com/claude-code";
 export const OPENROUTER_KEYS_URL = "https://openrouter.ai/settings/keys";
 export const OPENROUTER_ACTIVITY_URL = "https://openrouter.ai/activity";
+export const ANTHROPIC_KEYS_URL = "https://platform.claude.com/settings/keys";
+export const ANTHROPIC_LIMITS_URL = "https://platform.claude.com/settings/workspaces";
+export const ANTHROPIC_USAGE_URL = "https://platform.claude.com/usage";
 /** Cheap, long-context and long-lived, so a new install works before a model is picked. */
 export const OPENROUTER_DEFAULT_MODEL = "openai/gpt-4o-mini";
 

@@ -2,7 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Icon } from "./icons";
 import type { PDFDocumentProxy } from "./pdf";
 import { getAiHistory, saveAiHistory } from "./recent";
-import { CLAUDE_CODE_URL, dollars, OPENROUTER_ACTIVITY_URL, OPENROUTER_DEFAULT_MODEL, OPENROUTER_KEYS_URL, signInChatGPT, USAGE_URL, type AiProvider } from "./ai";
+import { ANTHROPIC_KEYS_URL, ANTHROPIC_LIMITS_URL, ANTHROPIC_USAGE_URL, CLAUDE_CODE_URL, dollars, OPENROUTER_ACTIVITY_URL,
+  OPENROUTER_DEFAULT_MODEL, OPENROUTER_KEYS_URL, signInChatGPT, USAGE_URL, type AiProvider } from "./ai";
 
 const AiMarkdown = lazy(() => import("./AiMarkdown").then((module) => ({ default: module.AiMarkdown })));
 
@@ -23,6 +24,40 @@ const CLAUDE_MODELS = [
   { id: "opus", name: "Opus" },
   { id: "haiku", name: "Haiku" },
 ];
+
+// Copy and links for the providers that use the person's own API key.
+const KEYED = {
+  anthropic: {
+    name: "Anthropic",
+    placeholder: "sk-ant-…",
+    title: "Use your Claude API key",
+    intro: "Paste a Claude API key to ask questions with Claude Haiku 5.5. Make the key in its own Console workspace and give that workspace a spend limit, so it can never cost more than you allow.",
+    keysUrl: ANTHROPIC_KEYS_URL,
+    keysLabel: "Create a key",
+    sendsTo: "Anthropic",
+    links: [{ href: ANTHROPIC_LIMITS_URL, label: "Workspace spend limit" }, { href: ANTHROPIC_USAGE_URL, label: "Usage" }],
+  },
+  openrouter: {
+    name: "OpenRouter",
+    placeholder: "sk-or-…",
+    title: "Use your OpenRouter key",
+    intro: "Paste an OpenRouter API key to ask questions with any model. Set a credit limit on the key at OpenRouter, and it can never cost more than you allow.",
+    keysUrl: OPENROUTER_KEYS_URL,
+    keysLabel: "Create or limit a key",
+    sendsTo: "OpenRouter and the model you pick",
+    links: [{ href: OPENROUTER_KEYS_URL, label: "Key settings" }, { href: OPENROUTER_ACTIVITY_URL, label: "Activity" }],
+  },
+} as const;
+const isKeyed = (p: AiProvider): p is KeyProvider => p === "anthropic" || p === "openrouter";
+
+function hardStopNote(provider: KeyProvider, s: KeyStatus) {
+  if (provider === "anthropic") {
+    return "Readr only sends this key's requests to Claude Haiku 5.5. The amount above is estimated from Anthropic's published prices. For a hard stop, set a spend limit on the key's workspace in the Claude Console. ";
+  }
+  return s.keyLimit !== null
+    ? `This key has used ${dollars(s.keyUsage ?? 0)} of its ${dollars(s.keyLimit)} limit on OpenRouter. `
+    : "This key has no credit limit on OpenRouter. Set one there as a hard stop. ";
+}
 
 const savedModel = (provider: AiProvider) =>
   localStorage.getItem(`folio:ai-model:${provider}`) || (provider === "openrouter" ? OPENROUTER_DEFAULT_MODEL : "");
@@ -90,7 +125,7 @@ interface Props {
 export function AiPanel({ pdf, docId, persist, docName, context, onClearContext, onGoToPage, onClose }: Props) {
   const ai = window.folioDesktop?.ai;
   const [status, setStatus] = useState<AiStatus | null>(null);
-  const [provider, setProviderState] = useState<AiProvider>(() => (localStorage.getItem("folio:ai-provider") as AiProvider) || "openrouter");
+  const [provider, setProviderState] = useState<AiProvider>(() => (localStorage.getItem("folio:ai-provider") as AiProvider) || "anthropic");
   const [models, setModels] = useState<{ id: string; name: string }[]>([]);
   const [orModels, setOrModels] = useState<OpenRouterModel[]>([]);
   const [model, setModelState] = useState(() => savedModel(provider));
@@ -170,30 +205,36 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
     });
   }, [ai, provider, orConnected]);
 
+  // The API-key provider on screen, if any, and its status.
+  const keyed = isKeyed(provider) ? provider : null;
+  const keyStatus = keyed && status ? (status[keyed] as KeyStatus) : null;
+  const keyedConnected = !!keyStatus?.connected;
+  const updateKeyStatus = (name: KeyProvider, next: KeyStatus) =>
+    setStatus((s) => (s ? { ...s, [name]: name === "anthropic" ? { ...s.anthropic, ...next } : next } : s));
+
   const saveKey = async () => {
-    if (!ai || savingKey) return;
+    if (!ai || !keyed || savingKey) return;
     setSavingKey(true);
     setSetupError(null);
-    const result = await ai.saveOpenRouterKey(keyInput);
+    const result = await ai.saveKey(keyed, keyInput);
     setSavingKey(false);
     if (result.ok && result.status) {
       setKeyInput("");
-      setStatus((s) => (s ? { ...s, openrouter: result.status! } : s));
+      updateKeyStatus(keyed, result.status);
     } else {
       setSetupError(result.error ?? "Couldn't save the key.");
     }
   };
   const openLimits = () => {
-    const or = status?.openrouter;
-    if (or) { setCapInput(String(or.monthlyCap)); setTokensInput(String(or.maxTokens)); }
+    if (keyStatus) { setCapInput(String(keyStatus.monthlyCap)); setTokensInput(String(keyStatus.maxTokens)); }
     setSetupError(null);
     setShowLimits((v) => !v);
   };
   const saveLimits = async () => {
-    if (!ai) return;
-    const result = await ai.setOpenRouterSettings({ maxTokens: Number(tokensInput), monthlyCap: Number(capInput) });
+    if (!ai || !keyed) return;
+    const result = await ai.setLimits(keyed, { maxTokens: Number(tokensInput), monthlyCap: Number(capInput) });
     if (result.ok && result.status) {
-      setStatus((s) => (s ? { ...s, openrouter: result.status! } : s));
+      updateKeyStatus(keyed, result.status);
       setSetupError(null);
       setShowLimits(false);
     } else {
@@ -201,9 +242,8 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
     }
   };
   const removeKey = async () => {
-    if (!ai) return;
-    const next = await ai.clearOpenRouterKey();
-    setStatus((s) => (s ? { ...s, openrouter: next } : s));
+    if (!ai || !keyed) return;
+    updateKeyStatus(keyed, await ai.clearKey(keyed));
     setShowLimits(false);
   };
 
@@ -223,8 +263,8 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
       if (event.type !== "delta") {
         busyRef.current = null;
         setBusy(null);
-        // OpenRouter reports what an answer cost, so refresh the spend shown under the composer.
-        if (event.code === "signed_out" || providerRef.current === "openrouter") void ai.status().then(setStatus);
+        // API-key answers add to this month's spend, so refresh the amount shown under the composer.
+        if (event.code === "signed_out" || isKeyed(providerRef.current)) void ai.status().then(setStatus);
       }
     });
   }, [ai]);
@@ -235,7 +275,7 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
   }, [messages]);
 
   const ready = provider === "chatgpt" ? chatgptConnected
-    : provider === "openrouter" ? orConnected
+    : keyed ? keyedConnected
     : !!status?.claude.installed && status.claude.loggedIn;
 
   const send = useCallback(async (question: string) => {
@@ -282,9 +322,10 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
       <header className="ai-head">
         <div className="ai-title"><Icon name="sparkle" size={16} /> Ask AI</div>
         <div className="segmented small" role="tablist" aria-label="AI provider">
+          <button role="tab" aria-selected={provider === "anthropic"} className={provider === "anthropic" ? "on" : ""} title="Claude Haiku 5.5 with your Anthropic API key" onClick={() => setProvider("anthropic")}>Haiku</button>
           <button role="tab" aria-selected={provider === "openrouter"} className={provider === "openrouter" ? "on" : ""} onClick={() => setProvider("openrouter")}>OpenRouter</button>
           <button role="tab" aria-selected={provider === "chatgpt"} className={provider === "chatgpt" ? "on" : ""} onClick={() => setProvider("chatgpt")}>ChatGPT</button>
-          <button role="tab" aria-selected={provider === "claude"} className={provider === "claude" ? "on" : ""} onClick={() => setProvider("claude")}>Claude</button>
+          <button role="tab" aria-selected={provider === "claude"} className={provider === "claude" ? "on" : ""} title="Your Claude subscription through Claude Code" onClick={() => setProvider("claude")}>Claude</button>
         </div>
         <div className="ai-head-actions">
           <button className="pill-btn" title="New conversation" aria-label="New conversation" disabled={!messages.length || !!busy} onClick={() => setMessages([])}>
@@ -301,21 +342,21 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
           <div className="ai-card"><p>Ask AI is available in the Readr desktop app.</p></div>
         ) : !status ? (
           <p className="ai-checking">Checking connections…</p>
-        ) : provider === "openrouter" && !orConnected ? (
+        ) : keyed && keyStatus && !keyedConnected ? (
           <div className="ai-card">
-            <h3>Use your OpenRouter key</h3>
-            <p>Paste an OpenRouter API key to ask questions with any model. Set a credit limit on the key at OpenRouter, and it can never cost more than you allow.</p>
+            <h3>{KEYED[keyed].title}</h3>
+            <p>{KEYED[keyed].intro}</p>
             <form className="ai-key-form" onSubmit={(e) => { e.preventDefault(); void saveKey(); }}>
-              <input type="password" autoComplete="off" spellCheck={false} value={keyInput} placeholder="sk-or-…"
-                aria-label="OpenRouter API key" onChange={(e) => setKeyInput(e.target.value)} />
+              <input type="password" autoComplete="off" spellCheck={false} value={keyInput} placeholder={KEYED[keyed].placeholder}
+                aria-label={`${KEYED[keyed].name} API key`} onChange={(e) => setKeyInput(e.target.value)} />
               <button className="btn primary" type="submit" disabled={savingKey || !keyInput.trim()}>{savingKey ? "Checking…" : "Save key"}</button>
             </form>
             <div className="ai-card-actions">
-              <a className="btn ghost" href={OPENROUTER_KEYS_URL} target="_blank" rel="noreferrer">Create or limit a key</a>
+              <a className="btn ghost" href={KEYED[keyed].keysUrl} target="_blank" rel="noreferrer">{KEYED[keyed].keysLabel}</a>
             </div>
             <p className="fine">
-              The key is stored encrypted on this computer and never reaches the page. When you ask, your question and the document's text go to OpenRouter and the model you pick.
-              {!status.openrouter.encrypted && " This system has no secret store, so you'll need to add the key again each time the app starts."}
+              The key is stored encrypted on this computer and never reaches the page. When you ask, your question and the document's text go to {KEYED[keyed].sendsTo}.
+              {!keyStatus.encrypted && " This system has no secret store, so you'll need to add the key again each time the app starts."}
             </p>
           </div>
         ) : provider === "chatgpt" && !chatgptConnected ? (
@@ -344,7 +385,7 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
           </div>
         ) : (
           <>
-            {provider === "openrouter" && showLimits && (
+            {keyed && keyStatus && showLimits && (
               <div className="ai-card ai-limits">
                 <h3>Spending limits</h3>
                 <label>Monthly limit in this app, in dollars (0 turns it off)
@@ -354,10 +395,10 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
                   <input type="number" min="200" max="32000" step="100" value={tokensInput} onChange={(e) => setTokensInput(e.target.value)} />
                 </label>
                 <p className="fine">
-                  {status.openrouter.keyLimit !== null
-                    ? `This key has used ${dollars(status.openrouter.keyUsage ?? 0)} of its ${dollars(status.openrouter.keyLimit)} limit on OpenRouter. `
-                    : "This key has no credit limit on OpenRouter. Set one there as a hard stop. "}
-                  <a href={OPENROUTER_KEYS_URL} target="_blank" rel="noreferrer">Key settings</a> · <a href={OPENROUTER_ACTIVITY_URL} target="_blank" rel="noreferrer">Activity</a>
+                  {hardStopNote(keyed, keyStatus)}
+                  {KEYED[keyed].links.map((l, i) => (
+                    <span key={l.href}>{i > 0 && " · "}<a href={l.href} target="_blank" rel="noreferrer">{l.label}</a></span>
+                  ))}
                 </p>
                 <div className="ai-card-actions">
                   <button className="btn ghost" onClick={() => void removeKey()}>Remove key</button>
@@ -398,7 +439,7 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
                     {m.error.code === "usage_limit" && provider === "chatgpt" && (
                       <a className="btn primary" href={m.error.link || USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a>
                     )}
-                    {(m.error.code === "usage_limit" || m.error.code === "cap") && provider === "openrouter" && (
+                    {(m.error.code === "usage_limit" || m.error.code === "cap") && keyed && (
                       <button className="btn primary" onClick={openLimits}>Spending limits</button>
                     )}
                     {m.error.code === "signed_out" && provider === "chatgpt" && (
@@ -475,14 +516,16 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
                   {orModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </datalist>
               </>
+            ) : provider === "anthropic" ? (
+              <span className="ai-fixed-model" title="$0.10 in, $0.50 out per 1M tokens (higher above 100k-token prompts)">Claude Haiku 5.5</span>
             ) : (
               <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model">
                 {(provider === "chatgpt" ? models : CLAUDE_MODELS).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             )}
-            {provider === "openrouter" ? (
+            {keyStatus ? (
               <span>
-                {dollars(status?.openrouter.monthSpend ?? 0)}{status && status.openrouter.monthlyCap > 0 ? ` of ${dollars(status.openrouter.monthlyCap)}` : ""} this month ·{" "}
+                {dollars(keyStatus.monthSpend)}{keyStatus.monthlyCap > 0 ? ` of ${dollars(keyStatus.monthlyCap)}` : ""} this month ·{" "}
                 <button type="button" className="link-btn" onClick={openLimits}>Limits</button>
               </span>
             ) : provider === "chatgpt" ? (

@@ -373,7 +373,8 @@ const shortUrl = (url) => (url.href.length > 300 ? url.href.slice(0, 300) + "…
 
 // Readr's own links (src/ai.ts) open without asking.
 const FOLIO_LINKS = new Set(["https://chatgpt.com/settings/usage", "https://claude.com/claude-code",
-  "https://openrouter.ai/settings/keys", "https://openrouter.ai/activity"]);
+  "https://openrouter.ai/settings/keys", "https://openrouter.ai/activity",
+  "https://platform.claude.com/settings/keys", "https://platform.claude.com/settings/workspaces", "https://platform.claude.com/usage"]);
 let askingAboutLink = false;
 
 // Links open in the browser (mailto: in the mail app), never in Readr, and only once the user has seen where they go:

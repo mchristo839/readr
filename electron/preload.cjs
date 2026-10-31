@@ -52,9 +52,10 @@ contextBridge.exposeInMainWorld("folioDesktop", {
     chatgptWelcomeSeen: () => ipcRenderer.invoke("folio:ai-chatgpt-welcome-seen"),
     chatgptModels: () => ipcRenderer.invoke("folio:ai-chatgpt-models"),
     recheckClaude: () => ipcRenderer.invoke("folio:ai-claude-recheck"),
-    saveOpenRouterKey: (key) => ipcRenderer.invoke("folio:ai-openrouter-save-key", key),
-    clearOpenRouterKey: () => ipcRenderer.invoke("folio:ai-openrouter-clear-key"),
-    setOpenRouterSettings: (settings) => ipcRenderer.invoke("folio:ai-openrouter-settings", settings),
+    /** For "openrouter" and "anthropic": the key goes to the main process and is never handed back. */
+    saveKey: (provider, key) => ipcRenderer.invoke("folio:ai-key-save", provider, key),
+    clearKey: (provider) => ipcRenderer.invoke("folio:ai-key-clear", provider),
+    setLimits: (provider, limits) => ipcRenderer.invoke("folio:ai-key-limits", provider, limits),
     openrouterModels: () => ipcRenderer.invoke("folio:ai-openrouter-models"),
     ask: (request) => ipcRenderer.invoke("folio:ai-ask", request),
     cancel: (id) => ipcRenderer.invoke("folio:ai-cancel", id),

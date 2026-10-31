@@ -37,14 +37,17 @@ interface ReadrDesktop {
 interface AiStatus {
   chatgpt: { connected: boolean; email: string; name: string; welcomeSeen: boolean; encrypted: boolean };
   claude: { installed: boolean; loggedIn: boolean; version?: string; subscription?: boolean; authMethod?: string };
-  openrouter: OpenRouterStatus;
+  openrouter: KeyStatus;
+  anthropic: KeyStatus & { model: string };
 }
 
-interface OpenRouterStatus {
+type KeyProvider = "openrouter" | "anthropic";
+
+interface KeyStatus {
   connected: boolean;
   encrypted: boolean;
   label: string;
-  /** Dollars used and the key's own limit on openrouter.ai, when it has one. */
+  /** Dollars used and the key's own limit, when the provider reports them (OpenRouter does, Anthropic doesn't). */
   keyUsage: number | null;
   keyLimit: number | null;
   keyRemaining: number | null;
@@ -84,11 +87,11 @@ interface ReadrAi {
   chatgptWelcomeSeen(): Promise<boolean>;
   chatgptModels(): Promise<{ ok: boolean; models?: { id: string; name: string }[]; error?: string; code?: string }>;
   recheckClaude(): Promise<AiStatus["claude"]>;
-  saveOpenRouterKey(key: string): Promise<{ ok: boolean; status?: OpenRouterStatus; error?: string }>;
-  clearOpenRouterKey(): Promise<OpenRouterStatus>;
-  setOpenRouterSettings(settings: { maxTokens: number; monthlyCap: number }): Promise<{ ok: boolean; status?: OpenRouterStatus; error?: string }>;
+  saveKey(provider: KeyProvider, key: string): Promise<{ ok: boolean; status?: KeyStatus; error?: string }>;
+  clearKey(provider: KeyProvider): Promise<KeyStatus>;
+  setLimits(provider: KeyProvider, limits: { maxTokens: number; monthlyCap: number }): Promise<{ ok: boolean; status?: KeyStatus; error?: string }>;
   openrouterModels(): Promise<{ ok: boolean; models?: OpenRouterModel[]; error?: string }>;
-  ask(request: { id: string; provider: "chatgpt" | "claude" | "openrouter"; model: string; instructions: string; messages: AiMessage[] }): Promise<boolean>;
+  ask(request: { id: string; provider: "chatgpt" | "claude" | "openrouter" | "anthropic"; model: string; instructions: string; messages: AiMessage[] }): Promise<boolean>;
   cancel(id: string): Promise<boolean>;
   onEvent(callback: (event: AiEvent) => void): () => void;
 }
