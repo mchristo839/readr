@@ -4,7 +4,7 @@ export function updateSummary(status: UpdateStatus): string {
     case "checking": return "Checking for updates…";
     case "downloading": return `Downloading ${status.version} (${status.percent ?? 0}%)`;
     case "ready": return `Version ${status.version} is ready to install.`;
-    case "available": return `Folio ${status.version} is available to download.`;
+    case "available": return `Marginalia ${status.version} is available to download.`;
     case "latest": return "You're up to date.";
     case "error": return `Couldn't check for updates. ${status.message ?? "Try again."}`;
     case "unsupported":

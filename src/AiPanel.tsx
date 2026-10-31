@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Icon } from "./icons";
 import type { PDFDocumentProxy } from "./pdf";
 import { getAiHistory, saveAiHistory } from "./recent";
-import { CLAUDE_CODE_URL, signInChatGPT, USAGE_URL, type AiProvider } from "./ai";
+import { CLAUDE_CODE_URL, dollars, OPENROUTER_ACTIVITY_URL, OPENROUTER_DEFAULT_MODEL, OPENROUTER_KEYS_URL, signInChatGPT, USAGE_URL, type AiProvider } from "./ai";
 
 const AiMarkdown = lazy(() => import("./AiMarkdown").then((module) => ({ default: module.AiMarkdown })));
 
@@ -23,6 +23,9 @@ const CLAUDE_MODELS = [
   { id: "opus", name: "Opus" },
   { id: "haiku", name: "Haiku" },
 ];
+
+const savedModel = (provider: AiProvider) =>
+  localStorage.getItem(`folio:ai-model:${provider}`) || (provider === "openrouter" ? OPENROUTER_DEFAULT_MODEL : "");
 
 // ── Document text ───────────────────────────────────────────────────────────────────────
 const textCache = new WeakMap<PDFDocumentProxy, Promise<{ text: string; truncated: boolean }>>();
@@ -54,7 +57,7 @@ function documentText(pdf: PDFDocumentProxy) {
 function instructions(name: string, doc: { text: string; truncated: boolean }) {
   const hasText = doc.text.replace(/\[Page \d+\]/g, "").trim().length > 0;
   return [
-    `You are the reading assistant in Folio, a PDF reader. The user is reading "${name}".`,
+    `You are the reading assistant in Marginalia, a PDF reader. The user is reading "${name}".`,
     hasText
       ? `Its extracted text is below between <document> tags, with [Page N] markers.${doc.truncated ? " The document is long, so only the beginning is included; say so if a question may depend on later pages." : ""}`
       : "This PDF has no extractable text (it may be scanned images), so you can only answer from the passages the user quotes.",
@@ -87,9 +90,17 @@ interface Props {
 export function AiPanel({ pdf, docId, persist, docName, context, onClearContext, onGoToPage, onClose }: Props) {
   const ai = window.folioDesktop?.ai;
   const [status, setStatus] = useState<AiStatus | null>(null);
-  const [provider, setProviderState] = useState<AiProvider>(() => (localStorage.getItem("folio:ai-provider") as AiProvider) || "chatgpt");
+  const [provider, setProviderState] = useState<AiProvider>(() => (localStorage.getItem("folio:ai-provider") as AiProvider) || "openrouter");
   const [models, setModels] = useState<{ id: string; name: string }[]>([]);
-  const [model, setModelState] = useState(() => localStorage.getItem(`folio:ai-model:${provider}`) ?? "");
+  const [orModels, setOrModels] = useState<OpenRouterModel[]>([]);
+  const [model, setModelState] = useState(() => savedModel(provider));
+  const [keyInput, setKeyInput] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  const [showLimits, setShowLimits] = useState(false);
+  const [capInput, setCapInput] = useState("");
+  const [tokensInput, setTokensInput] = useState("");
+  const providerRef = useRef(provider);
+  providerRef.current = provider;
   const [messages, setMessages] = useState<Message[]>(() => conversations.get(docId) ?? []);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -125,8 +136,9 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
   const setProvider = (next: AiProvider) => {
     setProviderState(next);
     localStorage.setItem("folio:ai-provider", next);
-    setModelState(localStorage.getItem(`folio:ai-model:${next}`) ?? "");
+    setModelState(savedModel(next));
     setSetupError(null);
+    setShowLimits(false);
   };
   const setModel = (id: string) => {
     setModelState(id);
@@ -149,6 +161,52 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
     });
   }, [ai, provider, chatgptConnected]);
 
+  // OpenRouter's model list is public. It feeds the model box's suggestions and the price shown for the chosen model.
+  const orConnected = !!status?.openrouter.connected;
+  useEffect(() => {
+    if (!ai || provider !== "openrouter" || !orConnected) return;
+    void ai.openrouterModels().then((result) => {
+      if (result.ok) setOrModels(result.models ?? []);
+    });
+  }, [ai, provider, orConnected]);
+
+  const saveKey = async () => {
+    if (!ai || savingKey) return;
+    setSavingKey(true);
+    setSetupError(null);
+    const result = await ai.saveOpenRouterKey(keyInput);
+    setSavingKey(false);
+    if (result.ok && result.status) {
+      setKeyInput("");
+      setStatus((s) => (s ? { ...s, openrouter: result.status! } : s));
+    } else {
+      setSetupError(result.error ?? "Couldn't save the key.");
+    }
+  };
+  const openLimits = () => {
+    const or = status?.openrouter;
+    if (or) { setCapInput(String(or.monthlyCap)); setTokensInput(String(or.maxTokens)); }
+    setSetupError(null);
+    setShowLimits((v) => !v);
+  };
+  const saveLimits = async () => {
+    if (!ai) return;
+    const result = await ai.setOpenRouterSettings({ maxTokens: Number(tokensInput), monthlyCap: Number(capInput) });
+    if (result.ok && result.status) {
+      setStatus((s) => (s ? { ...s, openrouter: result.status! } : s));
+      setSetupError(null);
+      setShowLimits(false);
+    } else {
+      setSetupError(result.error ?? "Couldn't save the limits.");
+    }
+  };
+  const removeKey = async () => {
+    if (!ai) return;
+    const next = await ai.clearOpenRouterKey();
+    setStatus((s) => (s ? { ...s, openrouter: next } : s));
+    setShowLimits(false);
+  };
+
   // Stream answers into the last assistant message.
   useEffect(() => {
     if (!ai) return;
@@ -165,7 +223,8 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
       if (event.type !== "delta") {
         busyRef.current = null;
         setBusy(null);
-        if (event.code === "signed_out") void ai.status().then(setStatus);
+        // OpenRouter reports what an answer cost, so refresh the spend shown under the composer.
+        if (event.code === "signed_out" || providerRef.current === "openrouter") void ai.status().then(setStatus);
       }
     });
   }, [ai]);
@@ -175,7 +234,9 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  const ready = provider === "chatgpt" ? chatgptConnected : !!status?.claude.installed && status.claude.loggedIn;
+  const ready = provider === "chatgpt" ? chatgptConnected
+    : provider === "openrouter" ? orConnected
+    : !!status?.claude.installed && status.claude.loggedIn;
 
   const send = useCallback(async (question: string) => {
     if (!ai || !question.trim() || busyRef.current || !ready) return;
@@ -197,7 +258,7 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
       setBusy(null);
       setMessages((list) => {
         const next = list.slice();
-        next[next.length - 1] = { role: "assistant", content: "", error: { message: "Folio couldn't send that question." } };
+        next[next.length - 1] = { role: "assistant", content: "", error: { message: "Marginalia couldn't send that question." } };
         return next;
       });
     }
@@ -221,6 +282,7 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
       <header className="ai-head">
         <div className="ai-title"><Icon name="sparkle" size={16} /> Ask AI</div>
         <div className="segmented small" role="tablist" aria-label="AI provider">
+          <button role="tab" aria-selected={provider === "openrouter"} className={provider === "openrouter" ? "on" : ""} onClick={() => setProvider("openrouter")}>OpenRouter</button>
           <button role="tab" aria-selected={provider === "chatgpt"} className={provider === "chatgpt" ? "on" : ""} onClick={() => setProvider("chatgpt")}>ChatGPT</button>
           <button role="tab" aria-selected={provider === "claude"} className={provider === "claude" ? "on" : ""} onClick={() => setProvider("claude")}>Claude</button>
         </div>
@@ -236,9 +298,26 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
 
       <div className="ai-body" ref={listRef}>
         {!ai ? (
-          <div className="ai-card"><p>Ask AI is available in the Folio desktop app.</p></div>
+          <div className="ai-card"><p>Ask AI is available in the Marginalia desktop app.</p></div>
         ) : !status ? (
           <p className="ai-checking">Checking connections…</p>
+        ) : provider === "openrouter" && !orConnected ? (
+          <div className="ai-card">
+            <h3>Use your OpenRouter key</h3>
+            <p>Paste an OpenRouter API key to ask questions with any model. Set a credit limit on the key at OpenRouter, and it can never cost more than you allow.</p>
+            <form className="ai-key-form" onSubmit={(e) => { e.preventDefault(); void saveKey(); }}>
+              <input type="password" autoComplete="off" spellCheck={false} value={keyInput} placeholder="sk-or-…"
+                aria-label="OpenRouter API key" onChange={(e) => setKeyInput(e.target.value)} />
+              <button className="btn primary" type="submit" disabled={savingKey || !keyInput.trim()}>{savingKey ? "Checking…" : "Save key"}</button>
+            </form>
+            <div className="ai-card-actions">
+              <a className="btn ghost" href={OPENROUTER_KEYS_URL} target="_blank" rel="noreferrer">Create or limit a key</a>
+            </div>
+            <p className="fine">
+              The key is stored encrypted on this computer and never reaches the page. When you ask, your question and the document's text go to OpenRouter and the model you pick.
+              {!status.openrouter.encrypted && " This system has no secret store, so you'll need to add the key again each time the app starts."}
+            </p>
+          </div>
         ) : provider === "chatgpt" && !chatgptConnected ? (
           <div className="ai-card">
             <h3>Use your ChatGPT plan</h3>
@@ -247,13 +326,13 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
               {signingIn ? "Waiting for your browser…" : "Continue with ChatGPT"}
             </button>
             {signingIn && <p className="fine">Finish signing in in your browser, then come back here.</p>}
-            <p className="fine">When you ask, Folio sends your question and the document's text to OpenAI. Nothing is sent otherwise.</p>
+            <p className="fine">When you ask, Marginalia sends your question and the document's text to OpenAI. Nothing is sent otherwise.</p>
           </div>
         ) : provider === "claude" && !(status.claude.installed && status.claude.loggedIn) ? (
           <div className="ai-card">
             <h3>Use your Claude subscription</h3>
             {!status.claude.installed ? (
-              <p>Folio uses Claude Code, Anthropic's official app, signed in with your own Claude Pro or Max account. Install Claude Code, sign in once, then check again.</p>
+              <p>Marginalia uses Claude Code, Anthropic's official app, signed in with your own Claude Pro or Max account. Install Claude Code, sign in once, then check again.</p>
             ) : (
               <p>Claude Code is installed but not signed in. Open a terminal, run <code>claude</code>, and sign in with your Claude account.</p>
             )}
@@ -261,13 +340,34 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
               {!status.claude.installed && <a className="btn ghost" href={CLAUDE_CODE_URL} target="_blank" rel="noreferrer">Get Claude Code</a>}
               <button className="btn primary" onClick={async () => setStatus({ ...status, claude: await ai.recheckClaude() })}>Check again</button>
             </div>
-            <p className="fine">Folio never sees your Claude password or tokens. When you ask, it sends your question and the document's text to Anthropic through Claude Code.</p>
+            <p className="fine">Marginalia never sees your Claude password or tokens. When you ask, it sends your question and the document's text to Anthropic through Claude Code.</p>
           </div>
         ) : (
           <>
+            {provider === "openrouter" && showLimits && (
+              <div className="ai-card ai-limits">
+                <h3>Spending limits</h3>
+                <label>Monthly limit in this app, in dollars (0 turns it off)
+                  <input type="number" min="0" max="10000" step="0.5" value={capInput} onChange={(e) => setCapInput(e.target.value)} />
+                </label>
+                <label>Longest answer, in tokens
+                  <input type="number" min="200" max="32000" step="100" value={tokensInput} onChange={(e) => setTokensInput(e.target.value)} />
+                </label>
+                <p className="fine">
+                  {status.openrouter.keyLimit !== null
+                    ? `This key has used ${dollars(status.openrouter.keyUsage ?? 0)} of its ${dollars(status.openrouter.keyLimit)} limit on OpenRouter. `
+                    : "This key has no credit limit on OpenRouter. Set one there as a hard stop. "}
+                  <a href={OPENROUTER_KEYS_URL} target="_blank" rel="noreferrer">Key settings</a> · <a href={OPENROUTER_ACTIVITY_URL} target="_blank" rel="noreferrer">Activity</a>
+                </p>
+                <div className="ai-card-actions">
+                  <button className="btn ghost" onClick={() => void removeKey()}>Remove key</button>
+                  <button className="btn primary" onClick={() => void saveLimits()}>Save</button>
+                </div>
+              </div>
+            )}
             {provider === "chatgpt" && !status.chatgpt.welcomeSeen && (
               <div className="ai-card ai-welcome">
-                <p><strong>You're connected{status.chatgpt.email ? ` as ${status.chatgpt.email}` : ""}.</strong> Questions you ask in Folio use your ChatGPT plan. You can manage usage in ChatGPT settings.</p>
+                <p><strong>You're connected{status.chatgpt.email ? ` as ${status.chatgpt.email}` : ""}.</strong> Questions you ask in Marginalia use your ChatGPT plan. You can manage usage in ChatGPT settings.</p>
                 <div className="ai-card-actions">
                   <a className="btn ghost" href={USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a>
                   <button className="btn primary" onClick={async () => { await ai.chatgptWelcomeSeen(); setStatus(await ai.status()); }}>Got it</button>
@@ -297,6 +397,9 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
                     <p>{m.error.message}</p>
                     {m.error.code === "usage_limit" && provider === "chatgpt" && (
                       <a className="btn primary" href={m.error.link || USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a>
+                    )}
+                    {(m.error.code === "usage_limit" || m.error.code === "cap") && provider === "openrouter" && (
+                      <button className="btn primary" onClick={openLimits}>Spending limits</button>
                     )}
                     {m.error.code === "signed_out" && provider === "chatgpt" && (
                       <button className="btn primary" onClick={signIn}>Continue with ChatGPT</button>
@@ -358,10 +461,31 @@ export function AiPanel({ pdf, docId, persist, docName, context, onClearContext,
         </form>
         {ready && (
           <div className="ai-meta">
-            <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model">
-              {(provider === "chatgpt" ? models : CLAUDE_MODELS).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
-            {provider === "chatgpt" ? (
+            {provider === "openrouter" ? (
+              <>
+                <input className="or-model" list="or-models" value={model} spellCheck={false} aria-label="Model"
+                  title={(() => {
+                    const m = orModels.find((o) => o.id === model);
+                    return m && m.promptPrice !== null && m.completionPrice !== null
+                      ? `${m.name}: ${dollars(m.promptPrice)} in, ${dollars(m.completionPrice)} out per 1M tokens`
+                      : "Type or pick an OpenRouter model id, like openai/gpt-4o-mini";
+                  })()}
+                  onChange={(e) => setModel(e.target.value.trim())} />
+                <datalist id="or-models">
+                  {orModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </datalist>
+              </>
+            ) : (
+              <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model">
+                {(provider === "chatgpt" ? models : CLAUDE_MODELS).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            )}
+            {provider === "openrouter" ? (
+              <span>
+                {dollars(status?.openrouter.monthSpend ?? 0)}{status && status.openrouter.monthlyCap > 0 ? ` of ${dollars(status.openrouter.monthlyCap)}` : ""} this month ·{" "}
+                <button type="button" className="link-btn" onClick={openLimits}>Limits</button>
+              </span>
+            ) : provider === "chatgpt" ? (
               <span>Using ChatGPT plan · <a href={USAGE_URL} target="_blank" rel="noreferrer">Manage usage</a></span>
             ) : (
               <span>{status?.claude.subscription ? "Using your Claude subscription via Claude Code" : "Using Claude Code"}</span>

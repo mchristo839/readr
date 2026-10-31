@@ -1,5 +1,5 @@
 // Turns a webpage into a PDF: load it in a hidden, locked-down window, then print it with Chromium.
-// The page runs in its own throwaway session (no cookies or storage shared with Folio or other
+// The page runs in its own throwaway session (no cookies or storage shared with Marginalia or other
 // captures), sandboxed, with no Node.js, no permissions, no pop-ups, and no downloads.
 const { BrowserWindow, session } = require("electron");
 const crypto = require("node:crypto");
@@ -57,7 +57,7 @@ const PREPARE_PAGE = `(async () => {
     if (position === "fixed") el.style.setProperty("position", "absolute", "important");
     else if (position === "sticky") el.style.setProperty("position", "relative", "important");
   }
-  // Images that aren't already links link to their own web address, so Folio can offer "Open in browser".
+  // Images that aren't already links link to their own web address, so Marginalia can offer "Open in browser".
   for (const img of document.querySelectorAll("img")) {
     const src = img.currentSrc || img.src;
     if (!/^https?:/i.test(src) || img.closest("a[href]")) continue;

@@ -4,7 +4,7 @@
 //   redirect). Requests use the person's own ChatGPT plan through the public Responses API.
 //   https://developers.openai.com/siwc/token-sharing-open-source/sign-in
 // - Claude: the person's own, unmodified Claude Code CLI, signed in with their Claude subscription
-//   through Anthropic's own flow. Folio never sees or stores Claude credentials; it runs `claude -p`
+//   through Anthropic's own flow. Marginalia never sees or stores Claude credentials; it runs `claude -p`
 //   with every tool disabled and reads the streamed answer.
 const { app, net, safeStorage, shell } = require("electron");
 const { spawn, execFile } = require("node:child_process");
@@ -107,9 +107,9 @@ async function verifyIdToken(idToken, clientId, nonce) {
   return payload;
 }
 
-const CALLBACK_PAGE = `<!doctype html><meta charset="utf-8"><title>Folio</title>
+const CALLBACK_PAGE = `<!doctype html><meta charset="utf-8"><title>Marginalia</title>
 <body style="font:16px system-ui;display:grid;place-items:center;height:90vh;color:#222">
-<p>You can close this tab and return to Folio.</p></body>`;
+<p>You can close this tab and return to Marginalia.</p></body>`;
 
 let signInInProgress = null;
 
@@ -172,12 +172,12 @@ async function signInChatGPT() {
         code_challenge_method: "S256",
         ext_agent_host_id: host.hostId,
       };
-      if (!host.clientId) params.agent_name_hint = "Folio";
+      if (!host.clientId) params.agent_name_hint = "Marginalia";
       await shell.openExternal(`${AUTHORIZE_URL}?${new URLSearchParams(params)}`);
 
       const query = await Promise.race([callback, timeout]);
       const clientId = query.get("client_id") || host.clientId;
-      if (!clientId) throw new Error("ChatGPT didn't finish registering Folio. Please try again.");
+      if (!clientId) throw new Error("ChatGPT didn't finish registering Marginalia. Please try again.");
       // Keep the issued client ID for every later sign-in on this computer, even if the rest fails.
       if (host.clientId !== clientId) saveHost({ ...host, clientId });
       const exchange = await postForm(TOKEN_URL, {
@@ -188,7 +188,7 @@ async function signInChatGPT() {
       const claims = await verifyIdToken(tokens.id_token, clientId, nonce);
       const scopes = String(tokens.scope || query.get("scope") || "").split(/[\s+]+/);
       if (!scopes.includes("chatgpt.tokens.use.direct")) {
-        throw new Error("ChatGPT plan usage wasn't granted. Sign in again and allow Folio to use your plan.");
+        throw new Error("ChatGPT plan usage wasn't granted. Sign in again and allow Marginalia to use your plan.");
       }
       await saveSession({
         accessToken: tokens.access_token, refreshToken: tokens.refresh_token, idToken: tokens.id_token,
@@ -206,7 +206,7 @@ async function signInChatGPT() {
 let refreshing = null;
 async function accessToken(force = false) {
   const current = await loadSession();
-  if (!current) throw Object.assign(new Error("Continue with ChatGPT to use your plan in Folio."), { code: "signed_out" });
+  if (!current) throw Object.assign(new Error("Continue with ChatGPT to use your plan in Marginalia."), { code: "signed_out" });
   if (!force && current.expiresAt - 60_000 > Date.now()) return current.accessToken;
   // Refresh tokens rotate: never run two refreshes at once.
   refreshing ??= (async () => {
@@ -223,7 +223,7 @@ async function accessToken(force = false) {
     const t = result.json;
     // Signed out while this refresh was in flight: don't bring the session back.
     if (!session || session.refreshToken !== current.refreshToken) {
-      throw Object.assign(new Error("Continue with ChatGPT to use your plan in Folio."), { code: "signed_out" });
+      throw Object.assign(new Error("Continue with ChatGPT to use your plan in Marginalia."), { code: "signed_out" });
     }
     await saveSession({ ...current, accessToken: t.access_token, refreshToken: t.refresh_token ?? current.refreshToken,
       idToken: t.id_token ?? current.idToken, expiresAt: Date.now() + (t.expires_in ?? 3600) * 1000 });
@@ -244,7 +244,7 @@ async function signOutChatGPT() {
       await postForm(revocation_endpoint, { token: current.refreshToken, token_type_hint: "refresh_token", client_id: loadHost().clientId });
     }
   } catch {
-    /* tokens are already cleared locally; the person can also disconnect Folio in ChatGPT settings */
+    /* tokens are already cleared locally; the person can also disconnect Marginalia in ChatGPT settings */
   }
   return chatgptStatus();
 }
@@ -373,7 +373,7 @@ async function claudeStatus(fresh = false) {
 const CLAUDE_MODELS = new Set(["", "sonnet", "opus", "haiku"]);
 const CLAUDE_TIMEOUT_MS = 5 * 60_000;
 
-/** Removes prompt folders left behind if Folio or Claude Code exited mid-answer. */
+/** Removes prompt folders left behind if Marginalia or Claude Code exited mid-answer. */
 function cleanStaleClaudeFolders() {
   try {
     for (const entry of fs.readdirSync(os.tmpdir())) {
@@ -459,12 +459,182 @@ function transcript(messages) {
   return `${earlier}\n\nContinue the conversation. Reply to this latest message:\n\n${messages[messages.length - 1].content}`;
 }
 
+// ── OpenRouter ─────────────────────────────────────────────────────────────────────────────
+// The person's own OpenRouter API key, kept encrypted in the main process (never sent to the page). Spend is
+// limited three ways: the key's own credit limit on openrouter.ai (enforced server side), a monthly cap
+// tracked here from the cost OpenRouter reports for each answer, and a cap on the length of each answer.
+const OPENROUTER = "https://openrouter.ai/api/v1";
+const OPENROUTER_KEYS_URL = "https://openrouter.ai/settings/keys";
+const OR_KEY_FILE = "openrouter-key.bin";
+const OR_DEFAULTS = { maxTokens: 2000, monthlyCap: 5 };
+let orKeyInMemory = null; // used only when the system has no secret store
+
+async function readOpenRouterKey() {
+  if (orKeyInMemory) return orKeyInMemory;
+  try {
+    if (!fs.existsSync(file(OR_KEY_FILE)) || !(await safeStorage.isAsyncEncryptionAvailable())) return null;
+    const { result } = await safeStorage.decryptStringAsync(fs.readFileSync(file(OR_KEY_FILE)));
+    return typeof result === "string" && result ? result : null;
+  } catch { return null; }
+}
+
+function clearOpenRouterKey() {
+  orKeyInMemory = null;
+  try { fs.rmSync(file(OR_KEY_FILE), { force: true }); } catch {}
+}
+
+function loadOpenRouterSettings() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(file("openrouter-settings.json"), "utf8"));
+    const maxTokens = Number.isInteger(saved.maxTokens) && saved.maxTokens >= 200 && saved.maxTokens <= 32000 ? saved.maxTokens : OR_DEFAULTS.maxTokens;
+    const monthlyCap = typeof saved.monthlyCap === "number" && saved.monthlyCap >= 0 && saved.monthlyCap <= 10000 ? saved.monthlyCap : OR_DEFAULTS.monthlyCap;
+    return { maxTokens, monthlyCap };
+  } catch { return { ...OR_DEFAULTS }; }
+}
+
+function saveOpenRouterSettings(next) {
+  const maxTokens = Math.round(Number(next?.maxTokens));
+  const monthlyCap = Math.round(Number(next?.monthlyCap) * 100) / 100;
+  if (!(maxTokens >= 200 && maxTokens <= 32000)) throw new Error("Answer length must be between 200 and 32,000 tokens.");
+  if (!(monthlyCap >= 0 && monthlyCap <= 10000)) throw new Error("The monthly limit must be between 0 and 10,000 dollars. Use 0 to turn it off.");
+  writeAtomic("openrouter-settings.json", JSON.stringify({ maxTokens, monthlyCap }));
+  return { maxTokens, monthlyCap };
+}
+
+const monthKey = () => new Date().toISOString().slice(0, 7);
+
+function monthSpend() {
+  try {
+    const ledger = JSON.parse(fs.readFileSync(file("openrouter-ledger.json"), "utf8"));
+    return ledger.month === monthKey() && typeof ledger.cost === "number" ? ledger.cost : 0;
+  } catch { return 0; }
+}
+
+function addSpend(cost) {
+  if (!(typeof cost === "number" && cost > 0 && cost < 1000)) return;
+  try { writeAtomic("openrouter-ledger.json", JSON.stringify({ month: monthKey(), cost: monthSpend() + cost })); } catch {}
+}
+
+async function openrouterStatus() {
+  const encrypted = await safeStorage.isAsyncEncryptionAvailable();
+  const settings = loadOpenRouterSettings();
+  const base = { connected: false, encrypted, label: "", keyUsage: null, keyLimit: null, keyRemaining: null,
+    monthSpend: monthSpend(), ...settings };
+  const key = await readOpenRouterKey();
+  if (!key) return base;
+  try {
+    const response = await net.fetch(`${OPENROUTER}/key`, { headers: { Authorization: `Bearer ${key}` } });
+    if (response.status === 401 || response.status === 403) { clearOpenRouterKey(); return base; }
+    if (response.ok) {
+      const data = (await response.json()).data ?? {};
+      const num = (v) => (typeof v === "number" ? v : null);
+      return { ...base, connected: true, label: typeof data.label === "string" ? data.label : "",
+        keyUsage: num(data.usage), keyLimit: num(data.limit), keyRemaining: num(data.limit_remaining) };
+    }
+  } catch {}
+  return { ...base, connected: true }; // offline: keep the key, skip the live numbers
+}
+
+async function saveOpenRouterKey(raw) {
+  const key = typeof raw === "string" ? raw.trim() : "";
+  if (!/^sk-or-[A-Za-z0-9_-]{16,200}$/.test(key)) throw new Error("That doesn't look like an OpenRouter key. Keys start with sk-or-.");
+  const check = await net.fetch(`${OPENROUTER}/key`, { headers: { Authorization: `Bearer ${key}` } });
+  if (check.status === 401 || check.status === 403) throw new Error("OpenRouter rejected that key. Check that you copied all of it.");
+  if (!check.ok) throw new Error(`Couldn't reach OpenRouter to check the key (${check.status}). Try again.`);
+  if (await safeStorage.isAsyncEncryptionAvailable()) {
+    writeAtomic(OR_KEY_FILE, await safeStorage.encryptStringAsync(key));
+    orKeyInMemory = null;
+  } else {
+    orKeyInMemory = key; // never written to disk unencrypted; sign in again next launch
+  }
+}
+
+async function openrouterModels() {
+  const response = await net.fetch(`${OPENROUTER}/models`);
+  if (!response.ok) throw new Error(`Couldn't load OpenRouter models (${response.status}).`);
+  const list = (await response.json()).data;
+  if (!Array.isArray(list)) return [];
+  const perMillion = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.round(n * 1e8) / 100 : null; };
+  return list
+    .filter((m) => typeof m?.id === "string" && (!m.architecture?.output_modalities || m.architecture.output_modalities.includes("text")))
+    .map((m) => ({ id: m.id, name: typeof m.name === "string" ? m.name : m.id,
+      context: Number.isFinite(m.context_length) ? m.context_length : null,
+      promptPrice: perMillion(m.pricing?.prompt), completionPrice: perMillion(m.pricing?.completion) }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function openrouterError(status, body) {
+  const detail = String(body?.error?.message ?? "").split("\n")[0].slice(0, 200);
+  if (status === 401) return Object.assign(new Error("OpenRouter rejected your key. Add it again in the key settings."), { code: "signed_out" });
+  if (status === 402) return Object.assign(new Error("Your OpenRouter key or credit balance is used up. Raise the key's limit or add credit on OpenRouter."), { code: "usage_limit", link: OPENROUTER_KEYS_URL });
+  if (status === 429) return new Error("OpenRouter is rate limiting this model. Wait a moment or pick another model.");
+  if (status === 404) return new Error(detail || "OpenRouter doesn't have that model, or it isn't available to your key. Pick another model.");
+  return new Error(detail || `OpenRouter couldn't answer${status ? ` (${status})` : ""}. Please try again.`);
+}
+
+async function askOpenRouter({ model, instructions, messages }, emit, signal) {
+  if (!model) throw new Error("Pick a model first.");
+  const key = await readOpenRouterKey();
+  if (!key) throw Object.assign(new Error("Add your OpenRouter key to ask questions."), { code: "signed_out" });
+  const { maxTokens, monthlyCap } = loadOpenRouterSettings();
+  if (monthlyCap > 0 && monthSpend() >= monthlyCap) {
+    throw Object.assign(new Error(`You've reached your monthly limit of $${monthlyCap.toFixed(2)}. Raise it in the key settings to keep asking.`), { code: "cap" });
+  }
+  const response = await net.fetch(`${OPENROUTER}/chat/completions`, {
+    method: "POST", signal,
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "text/event-stream",
+      "X-Title": "Marginalia" },
+    body: JSON.stringify({
+      model, stream: true, max_tokens: maxTokens, usage: { include: true },
+      messages: [{ role: "system", content: instructions }, ...messages.map((m) => ({ role: m.role, content: m.content }))],
+    }),
+  });
+  if (!response.ok) {
+    let body = null;
+    try { body = await response.json(); } catch {}
+    throw openrouterError(response.status, body);
+  }
+  // Server-sent events. Lines starting with ":" are keep-alive comments and are skipped.
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = false;
+  let cutShort = false;
+  let cost = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let split;
+      while ((split = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, split);
+        buffer = buffer.slice(split + 2);
+        const data = block.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("\n");
+        if (!data) continue;
+        if (data === "[DONE]") { finished = true; continue; }
+        let event;
+        try { event = JSON.parse(data); } catch { continue; }
+        if (event.error) throw openrouterError(Number(event.error.code) || 0, event);
+        const choice = event.choices?.[0];
+        if (typeof choice?.delta?.content === "string" && choice.delta.content) emit(choice.delta.content);
+        if (choice?.finish_reason === "length") cutShort = true;
+        if (typeof event.usage?.cost === "number") cost = event.usage.cost;
+      }
+    }
+  } finally {
+    addSpend(cost); // also counts what was spent on an answer that was stopped part way, if OpenRouter reported it
+  }
+  if (cutShort) emit("\n\n*The answer hit the length limit. Raise it in the key settings if you want longer answers.*");
+  if (!finished && !cutShort && !signal.aborted) throw new Error("The connection to OpenRouter ended early. Please try again.");
+}
+
 // ── IPC surface ────────────────────────────────────────────────────────────────────────────
 const active = new Map();
 const MAX_CHARS = 1_500_000;
 
 function validRequest(req) {
-  return req && typeof req.id === "string" && req.id.length < 100 && (req.provider === "chatgpt" || req.provider === "claude")
+  return req && typeof req.id === "string" && req.id.length < 100 && (req.provider === "chatgpt" || req.provider === "claude" || req.provider === "openrouter")
     && typeof req.instructions === "string" && typeof req.model === "string" && req.model.length < 100
     && Array.isArray(req.messages) && req.messages.length > 0 && req.messages.length < 200
     && req.messages.every((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
@@ -475,7 +645,17 @@ const MAX_ACTIVE = 2;
 
 function register(handle, send) {
   cleanStaleClaudeFolders();
-  handle("folio:ai-status", async () => ({ chatgpt: await chatgptStatus(), claude: await claudeStatus() }));
+  handle("folio:ai-status", async () => ({ chatgpt: await chatgptStatus(), claude: await claudeStatus(), openrouter: await openrouterStatus() }));
+  handle("folio:ai-openrouter-save-key", async (_event, key) => {
+    try { await saveOpenRouterKey(key); return { ok: true, status: await openrouterStatus() }; } catch (e) { return { ok: false, error: e.message }; }
+  });
+  handle("folio:ai-openrouter-clear-key", async () => { clearOpenRouterKey(); return openrouterStatus(); });
+  handle("folio:ai-openrouter-settings", async (_event, next) => {
+    try { saveOpenRouterSettings(next); return { ok: true, status: await openrouterStatus() }; } catch (e) { return { ok: false, error: e.message }; }
+  });
+  handle("folio:ai-openrouter-models", async () => {
+    try { return { ok: true, models: await openrouterModels() }; } catch (e) { return { ok: false, error: e.message }; }
+  });
   handle("folio:ai-chatgpt-signin", async () => {
     try { return { ok: true, status: await signInChatGPT() }; } catch (e) { return { ok: false, error: e.message }; }
   });
@@ -497,7 +677,7 @@ function register(handle, send) {
     const controller = new AbortController();
     active.set(req.id, controller);
     const emit = (text) => send("folio:ai-event", { id: req.id, type: "delta", text });
-    const ask = req.provider === "chatgpt" ? askChatGPT : askClaude;
+    const ask = req.provider === "chatgpt" ? askChatGPT : req.provider === "openrouter" ? askOpenRouter : askClaude;
     Promise.resolve(ask(req, emit, controller.signal))
       .then(() => send("folio:ai-event", { id: req.id, type: "done" }))
       .catch((e) => send("folio:ai-event", controller.signal.aborted ? { id: req.id, type: "done" }

@@ -24,7 +24,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --omit=dev --audit-level=moderate
       - run: npm run test:chat-math
       - run: npm run build
       - name: Smoke test (Linux, virtual display)

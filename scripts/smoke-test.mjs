@@ -183,7 +183,7 @@ try {
 
   // The More menu opens and closes.
   await page.getByRole("button", { name: "More" }).click();
-  await page.getByRole("menuitem", { name: /About Folio/ }).waitFor();
+  await page.getByRole("menuitem", { name: /About Marginalia/ }).waitFor();
   await page.keyboard.press("Escape");
 
   // Settings links to the bundled changelog, and closing it returns to Settings.

@@ -72,7 +72,7 @@ export class MarkupController {
   #syncTimer = 0;
   #saveTimer = 0;
   #listener: (state: MarkupState) => void;
-  /** True while Folio itself switches pdf.js modes for a one-click highlight. */
+  /** True while Marginalia itself switches pdf.js modes for a one-click highlight. */
   quickHighlighting = false;
 
   constructor(bus: EventBus, viewer: PDFViewer, listener: (state: MarkupState) => void) {
@@ -204,7 +204,7 @@ export class MarkupController {
       // Stored on the pdf.js editor too, so saved copies of the PDF carry the note as a pop-up.
       (editor as unknown as { comment: string }).comment = note;
     } catch {
-      /* the note still lives in Folio's own record */
+      /* the note still lives in Marginalia's own record */
     }
   }
 

@@ -1,4 +1,4 @@
-// Minimal bridge between the Folio page and the desktop shell.
+// Minimal bridge between the Marginalia page and the desktop shell.
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("folioDesktop", {
@@ -51,6 +51,10 @@ contextBridge.exposeInMainWorld("folioDesktop", {
     chatgptWelcomeSeen: () => ipcRenderer.invoke("folio:ai-chatgpt-welcome-seen"),
     chatgptModels: () => ipcRenderer.invoke("folio:ai-chatgpt-models"),
     recheckClaude: () => ipcRenderer.invoke("folio:ai-claude-recheck"),
+    saveOpenRouterKey: (key) => ipcRenderer.invoke("folio:ai-openrouter-save-key", key),
+    clearOpenRouterKey: () => ipcRenderer.invoke("folio:ai-openrouter-clear-key"),
+    setOpenRouterSettings: (settings) => ipcRenderer.invoke("folio:ai-openrouter-settings", settings),
+    openrouterModels: () => ipcRenderer.invoke("folio:ai-openrouter-models"),
     ask: (request) => ipcRenderer.invoke("folio:ai-ask", request),
     cancel: (id) => ipcRenderer.invoke("folio:ai-cancel", id),
     /** Called with { id, type: "delta" | "done" | "error", text?, message?, code?, link? } for every answer. */

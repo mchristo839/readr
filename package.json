@@ -1,5 +1,5 @@
 {
-  "name": "folio-pdf-reader",
+  "name": "marginalia",
   "private": true,
   "version": "1.10.7",
   "type": "module",
@@ -26,7 +26,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
-    "electron": "^45.1.0",
+    "electron": "^45.2.1",
     "electron-builder": "^26.18.0",
     "katex": "^0.19.1",
     "mdast-util-from-markdown": "^2.1.0",
@@ -41,17 +41,17 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.5"
   },
-  "productName": "Folio",
-  "description": "A simple, clean PDF reader for Windows, macOS, and Linux",
+  "productName": "Marginalia",
+  "description": "A personal PDF reader with Ask AI through OpenRouter, forked from Folio",
   "license": "MIT",
-  "homepage": "https://github.com/Forward-Future/folio",
+  "homepage": "https://github.com/mchristo839/marginalia",
   "bugs": {
-    "url": "https://github.com/Forward-Future/folio/issues"
+    "url": "https://github.com/mchristo839/marginalia/issues"
   },
   "main": "electron/main.cjs",
   "build": {
-    "appId": "app.folio.reader",
-    "productName": "Folio",
+    "appId": "com.mariolucas.marginalia",
+    "productName": "Marginalia",
     "electronLanguages": [
       "en-US"
     ],
@@ -78,11 +78,11 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Folio",
-      "artifactName": "Folio-Setup.exe"
+      "shortcutName": "Marginalia",
+      "artifactName": "Marginalia-Setup.exe"
     },
     "portable": {
-      "artifactName": "Folio-Portable.exe"
+      "artifactName": "Marginalia-Portable.exe"
     },
     "fileAssociations": [
       {
@@ -96,8 +96,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "Forward-Future",
-        "repo": "folio-releases",
+        "owner": "mchristo839",
+        "repo": "marginalia",
         "releaseType": "release"
       }
     ],
@@ -153,10 +153,10 @@
       ],
       "identity": "-",
       "hardenedRuntime": false,
-      "artifactName": "Folio-mac.${ext}"
+      "artifactName": "Marginalia-mac.${ext}"
     },
     "dmg": {
-      "artifactName": "Folio-mac.dmg"
+      "artifactName": "Marginalia-mac.dmg"
     },
     "linux": {
       "target": [
@@ -166,36 +166,28 @@
       "category": "Office",
       "icon": "build/icon.png",
       "synopsis": "A simple, clean PDF reader",
-      "maintainer": "Forward Future <748450+mberman84@users.noreply.github.com>",
+      "maintainer": "Mario Lucas <mchristo839@users.noreply.github.com>",
       "mimeTypes": [
         "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/msword"
       ],
-      "executableName": "folio",
-      "syncDesktopName": true,
-      "extraResources": [
-        {
-          "from": "build/linux/folio-archive-keyring.gpg",
-          "to": "folio-archive-keyring.gpg"
-        }
-      ]
+      "executableName": "marginalia",
+      "syncDesktopName": true
     },
     "appImage": {
-      "artifactName": "Folio-linux-x86_64.AppImage"
+      "artifactName": "Marginalia-linux-x86_64.AppImage"
     },
     "deb": {
-      "artifactName": "Folio-linux-amd64.deb",
-      "afterInstall": "build/linux/after-install.tpl",
-      "afterRemove": "build/linux/after-remove.tpl"
+      "artifactName": "Marginalia-linux-amd64.deb"
     }
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Forward-Future/folio.git"
+    "url": "https://github.com/mchristo839/marginalia.git"
   },
-  "author": "Forward Future",
-  "desktopName": "folio-pdf-reader.desktop",
+  "author": "Mario Lucas",
+  "desktopName": "marginalia.desktop",
   "overrides": {
     "katex": "$katex"
   }

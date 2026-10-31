@@ -39,7 +39,7 @@ export function ChangelogDialog({ onClose }: { onClose: () => void }) {
       <div className="changelog">
         {RELEASES.map((r) => (
           <section key={r.version}>
-            <h3>Folio {r.version}</h3>
+            <h3>Marginalia {r.version}</h3>
             <ul>
               {r.items.map((item, i) => <li key={i}>{inline(item)}</li>)}
             </ul>

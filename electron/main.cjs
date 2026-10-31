@@ -1,4 +1,4 @@
-// Folio desktop shell: one window, PDFs (and Word documents, converted) opened from Explorer / "Open with",
+// Marginalia desktop shell: one window, PDFs (and Word documents, converted) opened from Explorer / "Open with",
 // files served over app://.
 const { app, BrowserWindow, protocol, net, ipcMain, dialog, shell, screen } = require("electron");
 const path = require("node:path");
@@ -42,7 +42,7 @@ const TITLEBAR = {
 
 const IS_MAC = process.platform === "darwin";
 const IS_LINUX = process.platform === "linux";
-const RELEASES_PAGE = "https://github.com/Forward-Future/folio-releases/releases/latest";
+const RELEASES_PAGE = "https://github.com/mchristo839/marginalia/releases/latest";
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
@@ -92,7 +92,7 @@ async function sendFile(file) {
 }
 
 // A Word document opens as a PDF, saved next to it ("Report.docx" gets "Report.pdf") so it's there to share
-// afterwards. A folder Folio can't write to (a read-only share) just means the PDF isn't kept.
+// afterwards. A folder Marginalia can't write to (a read-only share) just means the PDF isn't kept.
 async function sendWordFile(file, target) {
   const send = (channel, payload) => { if (!target.isDestroyed()) target.webContents.send(channel, payload); };
   const original = path.basename(file);
@@ -128,7 +128,7 @@ function logConvert(msg) {
 }
 
 // ── Auto-update ──────────────────────────────────────────────────────
-// Installed copies check GitHub Releases (Forward-Future/folio-releases, see "publish" in package.json)
+// Installed copies check GitHub Releases (mchristo839/marginalia, see "publish" in package.json)
 // on launch and every few hours, download new versions in the background, and install them on quit
 // or when the user clicks "Restart" in the update banner. Progress is shown on the home screen and
 // logged to update.log in the app's user-data folder.
@@ -245,7 +245,7 @@ function setupAutoUpdate() {
     logUpdate(`error: ${err?.stack || err}`);
     setUpdateStatus({ state: "error", message: String(err?.message || err).split("\n")[0] });
   });
-  logUpdate(`Folio ${app.getVersion()} (${process.arch}) starting update checks`);
+  logUpdate(`Marginalia ${app.getVersion()} (${process.arch}) starting update checks`);
   checkForUpdates();
   setInterval(() => void checkForUpdates(), UPDATE_INTERVAL_MS);
 }
@@ -272,7 +272,7 @@ function createWindow() {
     minHeight: 480,
     show: false,
     backgroundColor: TITLEBAR[theme].color,
-    title: "Folio",
+    title: "Marginalia",
     icon: path.join(__dirname, "icon.png"),
     titleBarStyle: "hidden",
     // macOS keeps its traffic lights (inset into the top bar); Windows and Linux draw their window
@@ -290,7 +290,7 @@ function createWindow() {
 
   const cameraOwner = win.webContents;
   const trustedCameraOrigin = isAppUrl;
-  // Folio's own page may write (never read) the clipboard, for its Copy buttons.
+  // Marginalia's own page may write (never read) the clipboard, for its Copy buttons.
   const clipboardWrite = (contents, permission, url) =>
     contents === cameraOwner && permission === "clipboard-sanitized-write" && isAppUrl(url ?? "");
   cameraOwner.session.setPermissionCheckHandler((contents, permission, origin, details) =>
@@ -300,7 +300,7 @@ function createWindow() {
     if (contents !== cameraOwner || permission !== "media" || !details.isMainFrame
       || !trustedCameraOrigin(details.requestingUrl) || !details.mediaTypes?.length
       || details.mediaTypes.some(type => type !== "video")) return callback(false);
-    dialog.showMessageBox(win, { type: "question", title: "Use camera for signature?", message: "Allow Folio to use your camera to capture a signature?",
+    dialog.showMessageBox(win, { type: "question", title: "Use camera for signature?", message: "Allow Marginalia to use your camera to capture a signature?",
       detail: "Camera images are processed on this device. No microphone is requested.", buttons: ["Allow camera", "Cancel"], defaultId: 1, cancelId: 1 })
       .then(result => callback(result.response === 0)).catch(() => callback(false));
   });
@@ -335,7 +335,7 @@ function createWindow() {
     if (/^https?:|^mailto:/.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
-  // Subframes (the print frame) may only show Folio pages, local blob: PDFs, and Chromium's built-in PDF viewer.
+  // Subframes (the print frame) may only show Marginalia pages, local blob: PDFs, and Chromium's built-in PDF viewer.
   const PDF_VIEWER = "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/";
   win.webContents.on("will-frame-navigate", (e) => {
     const allowed = isAppUrl(e.url) || e.url.startsWith("blob:app://folio/") || e.url.startsWith(PDF_VIEWER) || e.url === "about:blank";
@@ -357,7 +357,7 @@ function createWindow() {
       cancelId: 1,
       title: "Unsaved annotations",
       message: "You have highlights or notes that haven't been saved.",
-      detail: "Press Ctrl+S in Folio to save a copy with your annotations.",
+      detail: "Press Ctrl+S in Marginalia to save a copy with your annotations.",
     });
     if (choice === 0) e.preventDefault();
   });
@@ -416,8 +416,8 @@ function downloadPdf(rawUrl) {
     request.on("redirect", (_status, _method, redirectUrl) => {
       const next = new URL(redirectUrl, url);
       if (++hops > 10) return finish({ error: "That link redirects too many times." });
-      if (next.protocol !== "http:" && next.protocol !== "https:") return finish({ error: "That link redirects somewhere Folio can't open." });
-      if (isLocalHost(next.hostname) && !isLocalHost(url.hostname)) return finish({ error: "That link redirects to a local network address, so Folio didn't follow it." });
+      if (next.protocol !== "http:" && next.protocol !== "https:") return finish({ error: "That link redirects somewhere Marginalia can't open." });
+      if (isLocalHost(next.hostname) && !isLocalHost(url.hostname)) return finish({ error: "That link redirects to a local network address, so Marginalia didn't follow it." });
       url = next;
       request.followRedirect();
     });
@@ -479,7 +479,7 @@ if (!app.requestSingleInstanceLock()) {
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     });
 
-    // Only Folio's own page may call into the main process.
+    // Only Marginalia's own page may call into the main process.
     const handle = (channel, listener) => ipcMain.handle(channel, (event, ...args) => {
       if (!isTrustedSender(event)) throw new Error("Untrusted sender");
       return listener(event, ...args);
@@ -497,7 +497,7 @@ if (!app.requestSingleInstanceLock()) {
       if (file) setTimeout(() => void sendFile(file), 0);
       return !!file;
     });
-    // Word documents picked or dropped in Folio (PDFs are read by the page itself).
+    // Word documents picked or dropped in Marginalia (PDFs are read by the page itself).
     handle("folio:open-document", (_event, file) => {
       if (typeof file !== "string" || !WORD_FILE.test(file) || !path.isAbsolute(file)) throw new Error("Not a Word document");
       void sendFile(file);

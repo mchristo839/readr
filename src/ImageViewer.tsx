@@ -56,7 +56,7 @@ export function ImageMenu({ x, y, stageWidth, href, onView, onOpen }: {
   return (
     <div className="selection-popover" role="toolbar" aria-label="Image" style={{ left, top: Math.max(8, y - 54) }}>
       <div className="pop-row">
-        <button className="pop-btn" onClick={onView} title="View larger in Folio">
+        <button className="pop-btn" onClick={onView} title="View larger in Marginalia">
           <Icon name="expand" size={15} /> View larger
         </button>
         {href && (

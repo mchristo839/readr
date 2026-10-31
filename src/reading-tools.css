@@ -608,6 +608,52 @@
   text-underline-offset: 2px;
   font: inherit;
 }
+.ai-meta .or-model {
+  width: 150px;
+  min-width: 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.link-btn {
+  font: inherit;
+  color: var(--text-2);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.ai-key-form {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+.ai-key-form input,
+.ai-limits input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+.ai-limits label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
 .app[data-focus] .ai-panel {
   display: none;
 }

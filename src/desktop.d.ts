@@ -6,8 +6,8 @@ interface UpdateStatus {
   checkedAt?: number;
 }
 
-// Present only when Folio runs as the desktop app (see electron/preload.cjs).
-interface FolioDesktop {
+// Present only when Marginalia runs as the desktop app (see electron/preload.cjs).
+interface MarginaliaDesktop {
   /** `note` says where a converted Word document's PDF was saved. */
   onOpenFile(callback: (name: string, data: Uint8Array, note?: string) => void): () => void;
   onConverting(callback: (name: string) => void): () => void;
@@ -30,12 +30,36 @@ interface FolioDesktop {
   checkForUpdates(): void;
   getAutoUpdateEnabled(): Promise<boolean>;
   setAutoUpdateEnabled(enabled: boolean): Promise<boolean>;
-  ai: FolioAi;
+  ai: MarginaliaAi;
 }
 
 interface AiStatus {
   chatgpt: { connected: boolean; email: string; name: string; welcomeSeen: boolean; encrypted: boolean };
   claude: { installed: boolean; loggedIn: boolean; version?: string; subscription?: boolean; authMethod?: string };
+  openrouter: OpenRouterStatus;
+}
+
+interface OpenRouterStatus {
+  connected: boolean;
+  encrypted: boolean;
+  label: string;
+  /** Dollars used and the key's own limit on openrouter.ai, when it has one. */
+  keyUsage: number | null;
+  keyLimit: number | null;
+  keyRemaining: number | null;
+  /** Dollars spent through this app this month, and the limits set here (monthlyCap 0 means off). */
+  monthSpend: number;
+  maxTokens: number;
+  monthlyCap: number;
+}
+
+interface OpenRouterModel {
+  id: string;
+  name: string;
+  context: number | null;
+  /** Dollars per million tokens. */
+  promptPrice: number | null;
+  completionPrice: number | null;
 }
 
 interface AiMessage {
@@ -52,18 +76,22 @@ interface AiEvent {
   link?: string;
 }
 
-interface FolioAi {
+interface MarginaliaAi {
   status(): Promise<AiStatus>;
   signInChatGPT(): Promise<{ ok: boolean; status?: AiStatus["chatgpt"]; error?: string }>;
   signOutChatGPT(): Promise<AiStatus["chatgpt"]>;
   chatgptWelcomeSeen(): Promise<boolean>;
   chatgptModels(): Promise<{ ok: boolean; models?: { id: string; name: string }[]; error?: string; code?: string }>;
   recheckClaude(): Promise<AiStatus["claude"]>;
-  ask(request: { id: string; provider: "chatgpt" | "claude"; model: string; instructions: string; messages: AiMessage[] }): Promise<boolean>;
+  saveOpenRouterKey(key: string): Promise<{ ok: boolean; status?: OpenRouterStatus; error?: string }>;
+  clearOpenRouterKey(): Promise<OpenRouterStatus>;
+  setOpenRouterSettings(settings: { maxTokens: number; monthlyCap: number }): Promise<{ ok: boolean; status?: OpenRouterStatus; error?: string }>;
+  openrouterModels(): Promise<{ ok: boolean; models?: OpenRouterModel[]; error?: string }>;
+  ask(request: { id: string; provider: "chatgpt" | "claude" | "openrouter"; model: string; instructions: string; messages: AiMessage[] }): Promise<boolean>;
   cancel(id: string): Promise<boolean>;
   onEvent(callback: (event: AiEvent) => void): () => void;
 }
 
 interface Window {
-  folioDesktop?: FolioDesktop;
+  folioDesktop?: MarginaliaDesktop;
 }

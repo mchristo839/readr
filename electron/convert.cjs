@@ -1,5 +1,5 @@
-// Word documents (.doc, .docx) are converted to PDF before Folio opens them. The best converter on the computer
-// wins: Microsoft Word (Windows), then LibreOffice (any platform), then Folio's own, which lays the text, tables,
+// Word documents (.doc, .docx) are converted to PDF before Marginalia opens them. The best converter on the computer
+// wins: Microsoft Word (Windows), then LibreOffice (any platform), then Marginalia's own, which lays the text, tables,
 // and images out in a hidden window and prints them (.docx everywhere; .doc on macOS, through textutil).
 const { app, BrowserWindow, session } = require("electron");
 const { execFile } = require("node:child_process");
@@ -66,7 +66,7 @@ async function withLibreOffice(soffice, source, dir) {
   return path.join(dir, path.basename(source).replace(/\.[^.]+$/, ".pdf"));
 }
 
-// Folio's own layout for the built-in converter: a printed page with Word's usual defaults.
+// Marginalia's own layout for the built-in converter: a printed page with Word's usual defaults.
 const DOCUMENT_CSS = `
 @page { margin: 1in; }
 body { font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; font-size: 11pt; line-height: 1.4; color: #000; margin: 0; overflow-wrap: break-word; }
@@ -175,7 +175,7 @@ async function convertToPdf(file, log = () => {}) {
       try { return await builtIn(source, dir, title); }
       catch (error) {
         if (error.userMessage) throw error;
-        fail("Folio", error);
+        fail("Marginalia", error);
       }
     }
     throw Object.assign(new Error(failures.join("\n")), { userMessage: "The document may be damaged or protected with a password." });
