@@ -128,7 +128,7 @@ export async function removeRecent(id: string) {
 }
 
 // ── Highlights and notes ──────────────────────────────────────────────
-// Saved per document (same id as Recent) so markup survives closing Marginalia.
+// Saved per document (same id as Recent) so markup survives closing Readr.
 
 export interface StoredMark {
   id: string;

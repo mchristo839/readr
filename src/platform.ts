@@ -1,4 +1,4 @@
-// Which operating system Marginalia is running on, and shortcut labels written its way.
+// Which operating system Readr is running on, and shortcut labels written its way.
 // navigator.platform is deprecated; userAgentData covers Chromium, the old API is the fallback.
 const uaPlatform =
   (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform;

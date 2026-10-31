@@ -1,8 +1,8 @@
-# Marginalia
+# Readr
 
 A personal PDF reader for Windows, macOS, and Linux with Ask AI through OpenRouter.
 
-Marginalia is a fork of [Folio](https://github.com/Forward-Future/folio) by Forward Future (MIT licensed). It keeps Folio's
+Readr is a fork of [Folio](https://github.com/Forward-Future/folio) by Forward Future (MIT licensed). It keeps Folio's
 reader, highlights, notes, signing, and webpage-to-PDF features, and changes these things:
 
 - **Ask AI runs on OpenRouter.** Paste your own key in the Ask AI panel and pick any model. The key is stored encrypted

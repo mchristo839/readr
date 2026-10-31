@@ -201,7 +201,7 @@ export default function App() {
       annotationEditorMode: AnnotationEditorType.NONE,
       annotationEditorHighlightColors: HIGHLIGHTS.map((c) => `${c.name.toLowerCase()}=${c.hex}`).join(","),
       // Records where images are drawn (used to keep them true to color in night reading). The huge
-      // minimum size turns off pdf.js's own right-click image targets, which Marginalia doesn't use.
+      // minimum size turns off pdf.js's own right-click image targets, which Readr doesn't use.
       imagesRightClickMinSize: 1e9,
     });
     trackPageImages(eventBus);
@@ -302,7 +302,7 @@ export default function App() {
         const prev = docRef.current;
         const next: OpenDoc = { id, key, name, size: data.byteLength, pdf };
         docRef.current = next;
-        // Password-protected documents aren't stored by Marginalia (same rule as Recent).
+        // Password-protected documents aren't stored by Readr (same rule as Recent).
         persistRef.current = !password;
         void markupRef.current!.load(key, !password);
         setNoteBox(null);
@@ -312,7 +312,7 @@ export default function App() {
         linkRef.current!.setDocument(pdf, null);
         prev?.pdf.loadingTask.destroy();
 
-        // Markup is saved automatically; only documents Marginalia can't store count as having unsaved changes.
+        // Markup is saved automatically; only documents Readr can't store count as having unsaved changes.
         (pdf.annotationStorage as { onSetModified: unknown }).onSetModified = () => { if (!persistRef.current) setDirty(true); };
         (pdf.annotationStorage as { onResetModified: unknown }).onResetModified = () => setDirty(false);
 
@@ -326,7 +326,7 @@ export default function App() {
         setPending(null);
         setSearchOpen(false);
         setFind({ current: 0, total: 0, state: null });
-        document.title = `${name} — Marginalia`;
+        document.title = `${name} — Readr`;
 
         setLoading(false);
         setActiveDocument(id);
@@ -430,7 +430,7 @@ export default function App() {
   const openSample = useCallback(async () => {
     try {
       const res = await fetch(`${import.meta.env.BASE_URL}sample.pdf`);
-      await openBytes("Marginalia sample.pdf", new Uint8Array(await res.arrayBuffer()));
+      await openBytes("Readr sample.pdf", new Uint8Array(await res.arrayBuffer()));
     } catch {
       setError("Couldn't open the sample document.");
     }
@@ -452,7 +452,7 @@ export default function App() {
     setDirty(false);
     setSearchOpen(false);
     setFocus(false);
-    document.title = "Marginalia";
+    document.title = "Readr";
   }, [dirty]);
 
   // Remember where the reader left off.
@@ -647,7 +647,7 @@ export default function App() {
     return () => observer.disconnect();
   }, [container]);
 
-  // pdf.js shows a small note button on highlights that have a note; open Marginalia's note box from it.
+  // pdf.js shows a small note button on highlights that have a note; open Readr's note box from it.
   useEffect(() => {
     if (!container) return;
     const onClick = (e: MouseEvent) => {
@@ -914,7 +914,7 @@ export default function App() {
   // ── Drag & drop anywhere ────────────────────────────────────────────
   useEffect(() => {
     let depth = 0;
-    let internal = false; // dragging text or images from inside Marginalia isn't an "open" gesture
+    let internal = false; // dragging text or images from inside Readr isn't an "open" gesture
     const hasFiles = (e: DragEvent) => {
       const types = e.dataTransfer?.types ?? [];
       return !internal && (types.includes("Files") || types.includes("text/uri-list") || types.includes("text/plain"));
@@ -1006,9 +1006,9 @@ export default function App() {
     >
       <header className="topbar">
         <div className="topbar-left">
-          <button className="brand" onClick={doc ? closeDoc : undefined} title={doc ? "Back to library" : "Marginalia"}>
+          <button className="brand" onClick={doc ? closeDoc : undefined} title={doc ? "Back to library" : "Readr"}>
             <span className="brand-mark" />
-            <span className="brand-name">Marginalia</span>
+            <span className="brand-name">Readr</span>
           </button>
           {doc && (
             <>
@@ -1060,7 +1060,7 @@ export default function App() {
                 : []),
               { kind: "action", icon: "settings", label: "Settings", shortcut: keys("Ctrl ,"), onSelect: () => setDialog("settings") },
               { kind: "action", icon: "keyboard", label: "Keyboard shortcuts", shortcut: "?", onSelect: () => setDialog("shortcuts") },
-              { kind: "action", icon: "info", label: "About Marginalia", onSelect: () => setDialog("about") },
+              { kind: "action", icon: "info", label: "About Readr", onSelect: () => setDialog("about") },
             ]}
           />
         </div>
@@ -1285,7 +1285,7 @@ export default function App() {
       {updateVersion && (
         <div className="update-card" role="status">
           <div>
-            <strong>Marginalia {updateVersion} is ready</strong>
+            <strong>Readr {updateVersion} is ready</strong>
             <span>Restart to update. Installation on close follows your auto-update setting.</span>
           </div>
           <button

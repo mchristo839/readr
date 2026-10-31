@@ -40,7 +40,7 @@ const EDITIONS: Record<string, string> = {
 
 export function AboutDialog({ onClose, onOpenSettings }: { onClose: () => void; onOpenSettings: () => void }) {
   const desktop = window.folioDesktop;
-  const [info, setInfo] = useState<Awaited<ReturnType<MarginaliaDesktop["getAppInfo"]>> | null>(null);
+  const [info, setInfo] = useState<Awaited<ReturnType<ReadrDesktop["getAppInfo"]>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +49,7 @@ export function AboutDialog({ onClose, onOpenSettings }: { onClose: () => void; 
     });
     return () => { cancelled = true; };
   }, [desktop]);
-  return <Modal title="About Marginalia" onClose={onClose}>
+  return <Modal title="About Readr" onClose={onClose}>
     <dl className="info-list">
       <div><dt>Version</dt><dd>{info?.version ?? (desktop ? "Loading..." : "Browser edition")}</dd></div>
       <div><dt>Edition</dt><dd>{EDITIONS[info?.mode ?? ""] ?? (desktop ? "Development" : "Web")}</dd></div>
@@ -185,7 +185,7 @@ export function OpenUrlDialog({ onSubmit, onClose }: { onSubmit: (url: string) =
           if (url) onSubmit(url);
         }}
       >
-        <p>Paste a link to a PDF or a webpage. Webpages become a PDF you can highlight and mark up. You can also drop or paste a link anywhere in Marginalia.</p>
+        <p>Paste a link to a PDF or a webpage. Webpages become a PDF you can highlight and mark up. You can also drop or paste a link anywhere in Readr.</p>
         <input type="url" autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="https://example.com/article" aria-label="PDF URL" />
         {value.trim() && !url && <p className="form-error">Enter an http:// or https:// address.</p>}
         <div className="form-actions">

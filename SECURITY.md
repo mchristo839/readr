@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please **don't open a public issue** for security problems. Instead, report them privately through
-[GitHub's private vulnerability reporting](https://github.com/mchristo839/marginalia/security/advisories/new).
+[GitHub's private vulnerability reporting](https://github.com/mchristo839/readr/security/advisories/new).
 
 Include the Folio version (shown in **About Folio**), what an attacker could do, and steps or a sample PDF that
 reproduce it. You can expect an acknowledgement within a week. Fixes ship as a new release that installed copies pick

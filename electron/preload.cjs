@@ -1,4 +1,4 @@
-// Minimal bridge between the Marginalia page and the desktop shell.
+// Minimal bridge between the Readr page and the desktop shell.
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("folioDesktop", {

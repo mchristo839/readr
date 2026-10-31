@@ -4,7 +4,7 @@
 //   redirect). Requests use the person's own ChatGPT plan through the public Responses API.
 //   https://developers.openai.com/siwc/token-sharing-open-source/sign-in
 // - Claude: the person's own, unmodified Claude Code CLI, signed in with their Claude subscription
-//   through Anthropic's own flow. Marginalia never sees or stores Claude credentials; it runs `claude -p`
+//   through Anthropic's own flow. Readr never sees or stores Claude credentials; it runs `claude -p`
 //   with every tool disabled and reads the streamed answer.
 const { app, net, safeStorage, shell } = require("electron");
 const { spawn, execFile } = require("node:child_process");
@@ -107,9 +107,9 @@ async function verifyIdToken(idToken, clientId, nonce) {
   return payload;
 }
 
-const CALLBACK_PAGE = `<!doctype html><meta charset="utf-8"><title>Marginalia</title>
+const CALLBACK_PAGE = `<!doctype html><meta charset="utf-8"><title>Readr</title>
 <body style="font:16px system-ui;display:grid;place-items:center;height:90vh;color:#222">
-<p>You can close this tab and return to Marginalia.</p></body>`;
+<p>You can close this tab and return to Readr.</p></body>`;
 
 let signInInProgress = null;
 
@@ -172,12 +172,12 @@ async function signInChatGPT() {
         code_challenge_method: "S256",
         ext_agent_host_id: host.hostId,
       };
-      if (!host.clientId) params.agent_name_hint = "Marginalia";
+      if (!host.clientId) params.agent_name_hint = "Readr";
       await shell.openExternal(`${AUTHORIZE_URL}?${new URLSearchParams(params)}`);
 
       const query = await Promise.race([callback, timeout]);
       const clientId = query.get("client_id") || host.clientId;
-      if (!clientId) throw new Error("ChatGPT didn't finish registering Marginalia. Please try again.");
+      if (!clientId) throw new Error("ChatGPT didn't finish registering Readr. Please try again.");
       // Keep the issued client ID for every later sign-in on this computer, even if the rest fails.
       if (host.clientId !== clientId) saveHost({ ...host, clientId });
       const exchange = await postForm(TOKEN_URL, {
@@ -188,7 +188,7 @@ async function signInChatGPT() {
       const claims = await verifyIdToken(tokens.id_token, clientId, nonce);
       const scopes = String(tokens.scope || query.get("scope") || "").split(/[\s+]+/);
       if (!scopes.includes("chatgpt.tokens.use.direct")) {
-        throw new Error("ChatGPT plan usage wasn't granted. Sign in again and allow Marginalia to use your plan.");
+        throw new Error("ChatGPT plan usage wasn't granted. Sign in again and allow Readr to use your plan.");
       }
       await saveSession({
         accessToken: tokens.access_token, refreshToken: tokens.refresh_token, idToken: tokens.id_token,
@@ -206,7 +206,7 @@ async function signInChatGPT() {
 let refreshing = null;
 async function accessToken(force = false) {
   const current = await loadSession();
-  if (!current) throw Object.assign(new Error("Continue with ChatGPT to use your plan in Marginalia."), { code: "signed_out" });
+  if (!current) throw Object.assign(new Error("Continue with ChatGPT to use your plan in Readr."), { code: "signed_out" });
   if (!force && current.expiresAt - 60_000 > Date.now()) return current.accessToken;
   // Refresh tokens rotate: never run two refreshes at once.
   refreshing ??= (async () => {
@@ -223,7 +223,7 @@ async function accessToken(force = false) {
     const t = result.json;
     // Signed out while this refresh was in flight: don't bring the session back.
     if (!session || session.refreshToken !== current.refreshToken) {
-      throw Object.assign(new Error("Continue with ChatGPT to use your plan in Marginalia."), { code: "signed_out" });
+      throw Object.assign(new Error("Continue with ChatGPT to use your plan in Readr."), { code: "signed_out" });
     }
     await saveSession({ ...current, accessToken: t.access_token, refreshToken: t.refresh_token ?? current.refreshToken,
       idToken: t.id_token ?? current.idToken, expiresAt: Date.now() + (t.expires_in ?? 3600) * 1000 });
@@ -244,7 +244,7 @@ async function signOutChatGPT() {
       await postForm(revocation_endpoint, { token: current.refreshToken, token_type_hint: "refresh_token", client_id: loadHost().clientId });
     }
   } catch {
-    /* tokens are already cleared locally; the person can also disconnect Marginalia in ChatGPT settings */
+    /* tokens are already cleared locally; the person can also disconnect Readr in ChatGPT settings */
   }
   return chatgptStatus();
 }
@@ -373,7 +373,7 @@ async function claudeStatus(fresh = false) {
 const CLAUDE_MODELS = new Set(["", "sonnet", "opus", "haiku"]);
 const CLAUDE_TIMEOUT_MS = 5 * 60_000;
 
-/** Removes prompt folders left behind if Marginalia or Claude Code exited mid-answer. */
+/** Removes prompt folders left behind if Readr or Claude Code exited mid-answer. */
 function cleanStaleClaudeFolders() {
   try {
     for (const entry of fs.readdirSync(os.tmpdir())) {
@@ -583,7 +583,7 @@ async function askOpenRouter({ model, instructions, messages }, emit, signal) {
   const response = await net.fetch(`${OPENROUTER}/chat/completions`, {
     method: "POST", signal,
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "text/event-stream",
-      "X-Title": "Marginalia" },
+      "X-Title": "Readr" },
     body: JSON.stringify({
       model, stream: true, max_tokens: maxTokens, usage: { include: true },
       messages: [{ role: "system", content: instructions }, ...messages.map((m) => ({ role: m.role, content: m.content }))],

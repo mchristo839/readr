@@ -44,7 +44,7 @@ function UpdateLine({ status }: { status: UpdateStatus }) {
         <>
           {" · "}
           <button className="link version-action" onClick={() => void desktop.openDownload()}>
-            Download Marginalia {status.version}
+            Download Readr {status.version}
           </button>
         </>
       );
@@ -130,7 +130,7 @@ export function Welcome({ onPick, onOpenUrl, onOpenBytes, onError, onSample, loa
               <button
                 className="link"
                 onClick={async () => {
-                  if (!confirm("Remove all recent files from Marginalia? The original files aren't affected.")) return;
+                  if (!confirm("Remove all recent files from Readr? The original files aren't affected.")) return;
                   await clearRecent();
                   setRecent([]);
                 }}
@@ -171,7 +171,7 @@ export function Welcome({ onPick, onOpenUrl, onOpenBytes, onError, onSample, loa
 
         {version && (
           <p className="version">
-            Marginalia {version}
+            Readr {version}
             {update && <UpdateLine status={update} />}
           </p>
         )}

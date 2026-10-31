@@ -1,5 +1,5 @@
 {
-  "name": "marginalia",
+  "name": "readr",
   "private": true,
   "version": "1.10.7",
   "type": "module",
@@ -41,17 +41,17 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.5"
   },
-  "productName": "Marginalia",
+  "productName": "Readr",
   "description": "A personal PDF reader with Ask AI through OpenRouter, forked from Folio",
   "license": "MIT",
-  "homepage": "https://github.com/mchristo839/marginalia",
+  "homepage": "https://github.com/mchristo839/readr",
   "bugs": {
-    "url": "https://github.com/mchristo839/marginalia/issues"
+    "url": "https://github.com/mchristo839/readr/issues"
   },
   "main": "electron/main.cjs",
   "build": {
-    "appId": "com.mariolucas.marginalia",
-    "productName": "Marginalia",
+    "appId": "com.mariolucas.readr",
+    "productName": "Readr",
     "electronLanguages": [
       "en-US"
     ],
@@ -78,11 +78,11 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Marginalia",
-      "artifactName": "Marginalia-Setup.exe"
+      "shortcutName": "Readr",
+      "artifactName": "Readr-Setup.exe"
     },
     "portable": {
-      "artifactName": "Marginalia-Portable.exe"
+      "artifactName": "Readr-Portable.exe"
     },
     "fileAssociations": [
       {
@@ -97,7 +97,7 @@
       {
         "provider": "github",
         "owner": "mchristo839",
-        "repo": "marginalia",
+        "repo": "readr",
         "releaseType": "release"
       }
     ],
@@ -153,10 +153,10 @@
       ],
       "identity": "-",
       "hardenedRuntime": false,
-      "artifactName": "Marginalia-mac.${ext}"
+      "artifactName": "Readr-mac.${ext}"
     },
     "dmg": {
-      "artifactName": "Marginalia-mac.dmg"
+      "artifactName": "Readr-mac.dmg"
     },
     "linux": {
       "target": [
@@ -172,22 +172,22 @@
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/msword"
       ],
-      "executableName": "marginalia",
+      "executableName": "readr",
       "syncDesktopName": true
     },
     "appImage": {
-      "artifactName": "Marginalia-linux-x86_64.AppImage"
+      "artifactName": "Readr-linux-x86_64.AppImage"
     },
     "deb": {
-      "artifactName": "Marginalia-linux-amd64.deb"
+      "artifactName": "Readr-linux-amd64.deb"
     }
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mchristo839/marginalia.git"
+    "url": "https://github.com/mchristo839/readr.git"
   },
   "author": "Mario Lucas",
-  "desktopName": "marginalia.desktop",
+  "desktopName": "readr.desktop",
   "overrides": {
     "katex": "$katex"
   }

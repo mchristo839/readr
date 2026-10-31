@@ -3,7 +3,7 @@ import { Modal } from "./Dialogs";
 import { CLAUDE_CODE_URL, signInChatGPT, USAGE_URL, type AiProvider } from "./ai";
 import { updateSummary } from "./updates";
 
-/** One place for every Marginalia preference. */
+/** One place for every Readr preference. */
 interface Props {
   theme: string;
   onTheme: (theme: "light" | "dark") => void;
@@ -68,7 +68,7 @@ export function SettingsDialog({ theme, onTheme, night, onNight, onOpenChangelog
   const [error, setError] = useState<string | null>(null);
 
   // Updates
-  const [info, setInfo] = useState<Awaited<ReturnType<MarginaliaDesktop["getAppInfo"]>> | null>(null);
+  const [info, setInfo] = useState<Awaited<ReturnType<ReadrDesktop["getAppInfo"]>> | null>(null);
   const [status, setStatus] = useState<UpdateStatus>({ state: "idle" });
   const [autoUpdate, setAutoUpdate] = useState<boolean | null>(null);
   const [savingUpdate, setSavingUpdate] = useState(false);
@@ -165,8 +165,8 @@ export function SettingsDialog({ theme, onTheme, night, onNight, onOpenChangelog
               <Row label="Automatic updates" hint={autoUpdate === false
                 ? "Off: no background checks or downloads. You can still check manually."
                 : notifyOnly
-                  ? "Marginalia checks for new versions and lets you know; download them from the releases page."
-                  : "Downloads updates in the background and installs them when Marginalia closes."}>
+                  ? "Readr checks for new versions and lets you know; download them from the releases page."
+                  : "Downloads updates in the background and installs them when Readr closes."}>
                 <Switch label="Automatic updates" checked={autoUpdate === true} disabled={autoUpdate === null || savingUpdate} onChange={async (on) => {
                   setSavingUpdate(true);
                   setError(null);
@@ -176,7 +176,7 @@ export function SettingsDialog({ theme, onTheme, night, onNight, onOpenChangelog
                 }} />
               </Row>
             )}
-            <Row label={`Marginalia ${info?.version ?? ""}`.trim()} hint={updateSummary(status) || (status.checkedAt ? `Last checked ${new Date(status.checkedAt).toLocaleString()}` : undefined)}>
+            <Row label={`Readr ${info?.version ?? ""}`.trim()} hint={updateSummary(status) || (status.checkedAt ? `Last checked ${new Date(status.checkedAt).toLocaleString()}` : undefined)}>
               {updatable ? (
                 <button className="btn ghost" disabled={status.state === "checking" || status.state === "downloading"}
                   onClick={() => status.state === "ready" ? desktop.installUpdate() : status.state === "available" ? void desktop.openDownload() : desktop.checkForUpdates()}>
@@ -188,7 +188,7 @@ export function SettingsDialog({ theme, onTheme, night, onNight, onOpenChangelog
         )}
 
         <Section title="About">
-          <Row label="What's new" hint="Changes in each version of Marginalia.">
+          <Row label="What's new" hint="Changes in each version of Readr.">
             <button className="btn ghost" onClick={onOpenChangelog}>View changelog</button>
           </Row>
         </Section>

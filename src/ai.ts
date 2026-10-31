@@ -9,7 +9,7 @@ export const OPENROUTER_ACTIVITY_URL = "https://openrouter.ai/activity";
 export const OPENROUTER_DEFAULT_MODEL = "openai/gpt-4o-mini";
 
 /** Runs the ChatGPT sign-in (it opens the browser); resolves once it's over with the refreshed status. */
-export async function signInChatGPT(ai: MarginaliaAi): Promise<{ status: AiStatus; error: string | null }> {
+export async function signInChatGPT(ai: ReadrAi): Promise<{ status: AiStatus; error: string | null }> {
   const result = await ai.signInChatGPT();
   return { status: await ai.status(), error: result.ok ? null : result.error ?? "ChatGPT sign-in failed." };
 }

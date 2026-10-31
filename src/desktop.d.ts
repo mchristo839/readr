@@ -6,8 +6,8 @@ interface UpdateStatus {
   checkedAt?: number;
 }
 
-// Present only when Marginalia runs as the desktop app (see electron/preload.cjs).
-interface MarginaliaDesktop {
+// Present only when Readr runs as the desktop app (see electron/preload.cjs).
+interface ReadrDesktop {
   /** `note` says where a converted Word document's PDF was saved. */
   onOpenFile(callback: (name: string, data: Uint8Array, note?: string) => void): () => void;
   onConverting(callback: (name: string) => void): () => void;
@@ -30,7 +30,7 @@ interface MarginaliaDesktop {
   checkForUpdates(): void;
   getAutoUpdateEnabled(): Promise<boolean>;
   setAutoUpdateEnabled(enabled: boolean): Promise<boolean>;
-  ai: MarginaliaAi;
+  ai: ReadrAi;
 }
 
 interface AiStatus {
@@ -76,7 +76,7 @@ interface AiEvent {
   link?: string;
 }
 
-interface MarginaliaAi {
+interface ReadrAi {
   status(): Promise<AiStatus>;
   signInChatGPT(): Promise<{ ok: boolean; status?: AiStatus["chatgpt"]; error?: string }>;
   signOutChatGPT(): Promise<AiStatus["chatgpt"]>;
@@ -93,5 +93,5 @@ interface MarginaliaAi {
 }
 
 interface Window {
-  folioDesktop?: MarginaliaDesktop;
+  folioDesktop?: ReadrDesktop;
 }
